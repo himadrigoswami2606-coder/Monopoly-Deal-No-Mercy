@@ -7,6 +7,8 @@ import {
   Room,
   Player,
   WinMode,
+  CardType,
+  ActionType,
   EVENT_CREATE_ROOM,
   EVENT_JOIN_ROOM,
   EVENT_TOGGLE_READY,
@@ -24,10 +26,16 @@ import {
   EVENT_GAME_OVER,
   EVENT_ERROR,
   EVENT_HOST_CHANGED,
+  EVENT_SEND_EMOTE,
+  EVENT_EMOTE_RECEIVED,
+  EVENT_ADD_BOT,
+  EVENT_REMOVE_BOT,
+  EVENT_FLIP_WILDCARD,
   PropertyColor,
 } from '../../shared/types';
 import { GameEngine } from './gameEngine';
 import { toPublicPlayerView } from './winCondition';
+import { PROPERTY_CONFIG } from '../../shared/deckConfig';
 
 // Store all active rooms indexed by room code
 const rooms = new Map<string, Room>();
@@ -35,6 +43,8 @@ const rooms = new Map<string, Room>();
 // Lookups for socket id -> room code and player id
 const socketToRoomCode = new Map<string, string>();
 const socketToPlayerId = new Map<string, string>();
+
+const BOT_NAMES = ['Mr. Monopoly', 'Tycoon Penny', 'Banker Cash', 'Baron Greed', 'Sly Fox'];
 
 /**
  * Generates an uppercase 6-character room code (avoiding confusing chars like O, 0, I, 1).
@@ -45,7 +55,6 @@ function generateRoomCode(): string {
   for (let i = 0; i < 6; i++) {
     code += chars.charAt(Math.floor(Math.random() * chars.length));
   }
-  // Ensure uniqueness
   return rooms.has(code) ? generateRoomCode() : code;
 }
 
@@ -59,12 +68,14 @@ function broadcastGameState(io: SocketIOServer, room: Room): void {
   const publicPlayers = room.players.map(toPublicPlayerView);
 
   room.players.forEach((player) => {
-    io.to(player.socketId).emit(EVENT_GAME_STATE_UPDATE, {
-      gameState: room.gameState,
-      myHand: player.hand,
-      myPlayer: player,
-      players: publicPlayers,
-    });
+    if (!player.isBot) {
+      io.to(player.socketId).emit(EVENT_GAME_STATE_UPDATE, {
+        gameState: room.gameState!,
+        myHand: player.hand,
+        myPlayer: player,
+        players: publicPlayers,
+      });
+    }
   });
 
   if (room.gameState.isGameOver && room.gameState.winnerId) {
@@ -75,7 +86,56 @@ function broadcastGameState(io: SocketIOServer, room: Room): void {
         breakdown: room.gameState.winBreakdown,
       });
     }
+  } else {
+    // If next player is a Bot, trigger AI automated turn
+    triggerBotTurnIfActive(io, room);
   }
+}
+
+/**
+ * Automated AI Bot turn execution
+ */
+function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
+  if (!room.gameState || room.gameState.isGameOver) return;
+
+  const activePlayer = room.players.find((p) => p.id === room.gameState!.activePlayerId);
+  if (!activePlayer || !activePlayer.isBot) return;
+
+  setTimeout(() => {
+    if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer.id) return;
+
+    // AI Bot plays up to 2-3 cards
+    let playsCount = 0;
+    const handCopy = [...activePlayer.hand];
+
+    for (const card of handCopy) {
+      if (playsCount >= 2) break;
+
+      if (card.type === CardType.PROPERTY) {
+        GameEngine.playCard(room, activePlayer.id, card.id);
+        playsCount++;
+      } else if (card.type === CardType.MONEY) {
+        GameEngine.playCard(room, activePlayer.id, card.id);
+        playsCount++;
+      } else if (card.type === CardType.ACTION && card.actionType === ActionType.PASS_GO) {
+        GameEngine.playCard(room, activePlayer.id, card.id);
+        playsCount++;
+      } else if (card.type === CardType.ACTION && card.actionType === ActionType.ITS_MY_BIRTHDAY) {
+        GameEngine.playCard(room, activePlayer.id, card.id);
+        playsCount++;
+      }
+    }
+
+    // End Bot turn after a brief delay
+    setTimeout(() => {
+      if (room.gameState && !room.gameState.isGameOver && room.gameState.activePlayerId === activePlayer.id) {
+        GameEngine.endTurn(room, activePlayer.id);
+        broadcastGameState(io, room);
+      }
+    }, 1000);
+
+    broadcastGameState(io, room);
+  }, 1200);
 }
 
 /**
@@ -127,8 +187,7 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
 
     socket.join(roomCode);
 
-    console.log(`[RoomManager] Room created: ${roomCode} by ${displayName} (${socket.id})`);
-
+    console.log(`[RoomManager] Room created: ${roomCode} by ${displayName}`);
     socket.emit(EVENT_ROOM_CREATED, { room, player: hostPlayer });
   });
 
@@ -155,7 +214,6 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       return;
     }
 
-    // Assign next available color index (0 to 5)
     const usedColorIndices = new Set(room.players.map((p) => p.colorIndex));
     let colorIndex = 0;
     for (let i = 0; i < 6; i++) {
@@ -185,8 +243,6 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
 
     socket.join(room.code);
 
-    console.log(`[RoomManager] ${displayName} joined room ${room.code} (${room.players.length}/6)`);
-
     socket.emit(EVENT_ROOM_JOINED, { room, player: newPlayer });
     broadcastRoomUpdate(io, room);
   });
@@ -210,7 +266,68 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   });
 
   // -------------------------------------------------------------------------
-  // 4. SET WIN MODE (Host Only)
+  // 4. ADD / REMOVE AI BOT PLAYERS (Host Only)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_ADD_BOT, () => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room || room.gameState !== null || room.hostId !== playerId) return;
+
+    if (room.players.length >= room.maxPlayers) {
+      socket.emit(EVENT_ERROR, { message: 'Room is already full (max 6 players).' });
+      return;
+    }
+
+    const usedColorIndices = new Set(room.players.map((p) => p.colorIndex));
+    let colorIndex = 0;
+    for (let i = 0; i < 6; i++) {
+      if (!usedColorIndices.has(i)) {
+        colorIndex = i;
+        break;
+      }
+    }
+
+    const botCount = room.players.filter((p) => p.isBot).length;
+    const botName = BOT_NAMES[botCount % BOT_NAMES.length];
+
+    const botPlayer: Player = {
+      id: `bot-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      displayName: `🤖 ${botName}`,
+      socketId: `bot-socket-${Date.now()}`,
+      isHost: false,
+      isReady: true,
+      colorIndex,
+      isBot: true,
+      hand: [],
+      bank: [],
+      properties: [],
+      debtChips: [],
+    };
+
+    room.players.push(botPlayer);
+    broadcastRoomUpdate(io, room);
+  });
+
+  socket.on(EVENT_REMOVE_BOT, (data: { botId: string }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room || room.gameState !== null || room.hostId !== playerId) return;
+
+    const idx = room.players.findIndex((p) => p.id === data.botId && p.isBot);
+    if (idx !== -1) {
+      room.players.splice(idx, 1);
+      broadcastRoomUpdate(io, room);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 5. SET WIN MODE (Host Only)
   // -------------------------------------------------------------------------
   socket.on(EVENT_SET_WIN_MODE, (data: { winMode: WinMode }) => {
     const roomCode = socketToRoomCode.get(socket.id);
@@ -218,22 +335,16 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     if (!roomCode || !playerId) return;
 
     const room = rooms.get(roomCode);
-    if (!room || room.gameState !== null) return;
-
-    if (room.hostId !== playerId) {
-      socket.emit(EVENT_ERROR, { message: 'Only the host can change game mode.' });
-      return;
-    }
+    if (!room || room.gameState !== null || room.hostId !== playerId) return;
 
     if (data.winMode === WinMode.STANDARD_NO_MERCY || data.winMode === WinMode.EXTENDED_NO_MERCY) {
       room.winMode = data.winMode;
-      console.log(`[RoomManager] Room ${roomCode} mode changed to ${data.winMode}`);
       broadcastRoomUpdate(io, room);
     }
   });
 
   // -------------------------------------------------------------------------
-  // 5. START GAME (Host Only, Min 2 Players)
+  // 6. START GAME
   // -------------------------------------------------------------------------
   socket.on(EVENT_START_GAME, () => {
     const roomCode = socketToRoomCode.get(socket.id);
@@ -241,22 +352,16 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     if (!roomCode || !playerId) return;
 
     const room = rooms.get(roomCode);
-    if (!room) return;
-
-    if (room.hostId !== playerId) {
-      socket.emit(EVENT_ERROR, { message: 'Only the host can start the game.' });
-      return;
-    }
+    if (!room || room.hostId !== playerId) return;
 
     if (room.players.length < room.minPlayers) {
       socket.emit(EVENT_ERROR, {
-        message: `At least ${room.minPlayers} players are required to start (currently ${room.players.length}).`,
+        message: `At least ${room.minPlayers} players are required to start.`,
       });
       return;
     }
 
-    // Check that players are ready
-    const nonHostPlayers = room.players.filter((p) => !p.isHost);
+    const nonHostPlayers = room.players.filter((p) => !p.isHost && !p.isBot);
     const unreadyPlayers = nonHostPlayers.filter((p) => !p.isReady);
     if (unreadyPlayers.length > 0) {
       socket.emit(EVENT_ERROR, {
@@ -265,29 +370,25 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       return;
     }
 
-    console.log(`[RoomManager] Starting game in room ${room.code} with ${room.players.length} players...`);
-
-    // Initialize authoritative game state
     const gameState = GameEngine.initializeGame(room);
     room.gameState = gameState;
 
-    // Draw initial turn cards for first player
     GameEngine.startTurnDraw(room, gameState.activePlayerId);
 
-    // Broadcast game start
     room.players.forEach((p) => {
-      io.to(p.socketId).emit(EVENT_GAME_STARTED, {
-        room,
-        myHand: p.hand,
-      });
+      if (!p.isBot) {
+        io.to(p.socketId).emit(EVENT_GAME_STARTED, {
+          room,
+          myHand: p.hand,
+        });
+      }
     });
 
-    // Broadcast initial state
     broadcastGameState(io, room);
   });
 
   // -------------------------------------------------------------------------
-  // 6. PLAY CARD
+  // 7. PLAY CARD
   // -------------------------------------------------------------------------
   socket.on(
     EVENT_PLAY_CARD,
@@ -326,7 +427,48 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   );
 
   // -------------------------------------------------------------------------
-  // 7. END TURN
+  // 8. FLIP WILDCARD BETWEEN ELIGIBLE PROPERTY SETS (Free Action)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_FLIP_WILDCARD, (data: { cardId: string; toColor: PropertyColor }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
+
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) return;
+
+    // Find wildcard card across property sets
+    let foundCard: any = null;
+    for (const set of player.properties) {
+      const cIdx = set.cards.findIndex((c) => c.id === data.cardId);
+      if (cIdx !== -1) {
+        foundCard = set.cards.splice(cIdx, 1)[0];
+        set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
+        if (set.cards.length === 0) {
+          player.properties = player.properties.filter((s) => s !== set);
+        }
+        break;
+      }
+    }
+
+    if (foundCard) {
+      let targetSet = player.properties.find((s) => s.color === data.toColor);
+      if (!targetSet) {
+        targetSet = { color: data.toColor, cards: [], house: false, hotel: false, isComplete: false };
+        player.properties.push(targetSet);
+      }
+      targetSet.cards.push(foundCard);
+      targetSet.isComplete = targetSet.cards.length >= (PROPERTY_CONFIG[data.toColor]?.setSize || 3);
+
+      broadcastGameState(io, room);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 9. END TURN & DRAW CARDS
   // -------------------------------------------------------------------------
   socket.on(EVENT_END_TURN, () => {
     const roomCode = socketToRoomCode.get(socket.id);
@@ -345,28 +487,41 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     broadcastGameState(io, room);
   });
 
-  // -------------------------------------------------------------------------
-  // 8. DRAW CARDS
-  // -------------------------------------------------------------------------
   socket.on(EVENT_DRAW_CARDS, () => {
     const roomCode = socketToRoomCode.get(socket.id);
     const playerId = socketToPlayerId.get(socket.id);
     if (!roomCode || !playerId) return;
 
     const room = rooms.get(roomCode);
-    if (!room || !room.gameState) return;
-
-    if (room.gameState.activePlayerId !== playerId) {
-      socket.emit(EVENT_ERROR, { message: "It is not your turn to draw cards." });
-      return;
-    }
+    if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
 
     GameEngine.drawCards(room, playerId, 2);
     broadcastGameState(io, room);
   });
 
   // -------------------------------------------------------------------------
-  // 9. LEAVE ROOM / DISCONNECT
+  // 10. REAL-TIME EMOTES
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_SEND_EMOTE, (data: { emote: string }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room) return;
+
+    const player = room.players.find((p) => p.id === playerId);
+    if (player) {
+      io.to(room.code).emit(EVENT_EMOTE_RECEIVED, {
+        playerId: player.id,
+        playerName: player.displayName,
+        emote: data.emote,
+      });
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 11. LEAVE ROOM / DISCONNECT
   // -------------------------------------------------------------------------
   const handleLeaveOrDisconnect = () => {
     const roomCode = socketToRoomCode.get(socket.id);
@@ -385,22 +540,16 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     const leavingPlayer = room.players[leavingPlayerIndex];
     room.players.splice(leavingPlayerIndex, 1);
 
-    console.log(`[RoomManager] ${leavingPlayer.displayName} left room ${roomCode}`);
-
-    // If room is empty, delete it
-    if (room.players.length === 0) {
+    if (room.players.filter((p) => !p.isBot).length === 0) {
       rooms.delete(roomCode);
-      console.log(`[RoomManager] Room ${roomCode} deleted (empty)`);
       return;
     }
 
-    // If host left, transfer host to next player
     if (leavingPlayer.isHost) {
-      const newHost = room.players[0];
+      const newHost = room.players.find((p) => !p.isBot) || room.players[0];
       newHost.isHost = true;
       room.hostId = newHost.id;
 
-      console.log(`[RoomManager] Host transferred to ${newHost.displayName} in room ${roomCode}`);
       io.to(roomCode).emit(EVENT_HOST_CHANGED, {
         newHostId: newHost.id,
         newHostName: newHost.displayName,

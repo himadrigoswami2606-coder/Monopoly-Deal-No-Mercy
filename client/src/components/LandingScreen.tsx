@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useSocket } from '../contexts/SocketContext';
 import { EVENT_CREATE_ROOM, EVENT_JOIN_ROOM } from '../../../shared/types';
 
@@ -18,6 +18,15 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   const { socket, isConnected } = useSocket();
   const [joinCode, setJoinCode] = useState('');
   const [isJoining, setIsJoining] = useState(false);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get('room');
+    if (roomParam && roomParam.length === 6) {
+      setJoinCode(roomParam.toUpperCase());
+      setIsJoining(true);
+    }
+  }, []);
 
   const handleCreateRoom = () => {
     if (!socket || !isConnected) {
@@ -46,7 +55,7 @@ export const LandingScreen: React.FC<LandingScreenProps> = ({
   };
 
   return (
-    <div className="min-h-screen tabletop-bg flex flex-col justify-between p-4 md:p-8">
+    <div className="min-h-screen felt-tabletop flex flex-col justify-between p-4 md:p-8">
       {/* Header bar */}
       <header className="flex justify-between items-center max-w-5xl mx-auto w-full">
         <div className="flex items-center gap-2">

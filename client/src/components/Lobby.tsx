@@ -8,6 +8,8 @@ import {
   EVENT_TOGGLE_READY,
   EVENT_SET_WIN_MODE,
   EVENT_LEAVE_ROOM,
+  EVENT_ADD_BOT,
+  EVENT_REMOVE_BOT,
 } from '../../../shared/types';
 import { PlayerCard } from './PlayerCard';
 
@@ -25,25 +27,36 @@ export const Lobby: React.FC<LobbyProps> = ({
   errorMessage,
 }) => {
   const { socket } = useSocket();
-  const [copied, setCopied] = useState(false);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const isHost = currentPlayer.isHost;
   const playerCount = room.players.length;
   const canStartCount = playerCount >= room.minPlayers;
 
-  // Non-host players must be ready
-  const nonHostPlayers = room.players.filter((p) => !p.isHost);
-  const allNonHostsReady = nonHostPlayers.every((p) => p.isReady);
+  // Non-host human players must be ready
+  const nonHostHumans = room.players.filter((p) => !p.isHost && !p.isBot);
+  const allNonHostsReady = nonHostHumans.every((p) => p.isReady);
   const canStart = isHost && canStartCount && allNonHostsReady;
 
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(room.code);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
+  const handleCopyInviteLink = () => {
+    const inviteUrl = `${window.location.origin}/?room=${room.code}`;
+    navigator.clipboard.writeText(inviteUrl);
+    setCopiedLink(true);
+    setTimeout(() => setCopiedLink(false), 2000);
   };
 
   const handleToggleReady = () => {
     socket?.emit(EVENT_TOGGLE_READY);
+  };
+
+  const handleAddBot = () => {
+    if (!isHost) return;
+    socket?.emit(EVENT_ADD_BOT);
+  };
+
+  const handleRemoveBot = (botId: string) => {
+    if (!isHost) return;
+    socket?.emit(EVENT_REMOVE_BOT, { botId });
   };
 
   const handleModeChange = (mode: WinMode) => {
@@ -61,18 +74,17 @@ export const Lobby: React.FC<LobbyProps> = ({
     onLeave();
   };
 
-  // Up to 6 player slots
   const emptySlotsCount = Math.max(0, 6 - playerCount);
   const emptySlots = Array.from({ length: emptySlotsCount });
 
   return (
-    <div className="min-h-screen tabletop-bg p-4 md:p-8 flex flex-col justify-between">
+    <div className="min-h-screen felt-tabletop p-4 md:p-8 flex flex-col justify-between">
       {/* Top Bar */}
       <header className="max-w-5xl mx-auto w-full flex justify-between items-center mb-6">
         <div className="flex items-center gap-3">
           <button
             onClick={handleLeaveRoom}
-            className="px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 hover:border-slate-500 text-slate-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5"
+            className="px-3 py-1.5 rounded-lg bg-[#081a12] border border-[#1f4d36] hover:border-slate-500 text-slate-300 hover:text-white text-xs font-semibold transition-all flex items-center gap-1.5"
           >
             <span>←</span>
             <span>Leave Lobby</span>
@@ -82,20 +94,20 @@ export const Lobby: React.FC<LobbyProps> = ({
           </div>
         </div>
 
-        {/* Room Code Badge */}
-        <div className="flex items-center gap-2 bg-slate-900/90 border border-slate-700 px-3.5 py-1.5 rounded-xl shadow">
+        {/* Room Code & Copy Link Pill */}
+        <div className="flex items-center gap-2 bg-[#0c2217] border border-[#1f4d36] px-3.5 py-1.5 rounded-2xl shadow">
           <span className="text-xs uppercase text-slate-400 font-semibold tracking-wider">
-            Room Code:
+            Room:
           </span>
           <span className="font-mono font-black text-amber-400 text-base tracking-widest">
             {room.code}
           </span>
           <button
-            onClick={handleCopyCode}
-            className="ml-1 p-1 px-2 rounded bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition-all"
-            title="Copy Code"
+            onClick={handleCopyInviteLink}
+            className="ml-2 py-1 px-3 rounded-lg bg-[#184a32] hover:bg-[#226344] text-amber-300 text-xs font-bold transition-all border border-[#2d6a4f]"
+            title="Copy 1-Click Invite Link"
           >
-            {copied ? '✓ Copied' : 'Copy'}
+            {copiedLink ? '✓ Link Copied!' : '🔗 Copy Invite Link'}
           </button>
         </div>
       </header>
@@ -104,7 +116,7 @@ export const Lobby: React.FC<LobbyProps> = ({
       <main className="max-w-5xl mx-auto w-full my-auto grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left 2 Cols: Player Roster (2–6 Slots) */}
         <div className="lg:col-span-2 space-y-4">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl">
+          <div className="bg-[#102b1e]/90 border border-[#1f4d36] rounded-3xl p-5 md:p-6 shadow-2xl">
             <div className="flex justify-between items-center mb-4">
               <h2 className="font-heading text-lg font-bold text-slate-100 uppercase tracking-wide flex items-center gap-2">
                 <span>Players in Room</span>
@@ -113,14 +125,19 @@ export const Lobby: React.FC<LobbyProps> = ({
                 </span>
               </h2>
 
-              <span className="text-xs text-slate-400 font-medium">
-                {playerCount < 2 ? 'Need 1 more player to start' : 'Ready to begin when players are ready'}
-              </span>
+              {isHost && playerCount < 6 && (
+                <button
+                  onClick={handleAddBot}
+                  className="px-3 py-1 rounded-xl bg-[#1b4332] hover:bg-[#2d6a4f] text-emerald-300 border border-emerald-500/40 text-xs font-bold transition-all flex items-center gap-1.5 shadow"
+                >
+                  <span>🤖</span>
+                  <span>+ Add AI Bot</span>
+                </button>
+              )}
             </div>
 
-            {/* Error notice if present */}
             {errorMessage && (
-              <div className="mb-4 p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
+              <div className="mb-4 p-2.5 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-xs font-semibold flex items-center gap-2">
                 <span>⚠️</span>
                 <span>{errorMessage}</span>
               </div>
@@ -129,20 +146,30 @@ export const Lobby: React.FC<LobbyProps> = ({
             {/* Player Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               {room.players.map((player) => (
-                <PlayerCard
-                  key={player.id}
-                  player={player}
-                  isSelf={player.id === currentPlayer.id}
-                  showLobbyControls={true}
-                  onToggleReady={handleToggleReady}
-                />
+                <div key={player.id} className="relative group">
+                  <PlayerCard
+                    player={player}
+                    isSelf={player.id === currentPlayer.id}
+                    showLobbyControls={true}
+                    onToggleReady={handleToggleReady}
+                  />
+                  {isHost && player.isBot && (
+                    <button
+                      onClick={() => handleRemoveBot(player.id)}
+                      className="absolute top-2 right-2 text-rose-400 hover:text-rose-200 text-xs font-bold px-1.5 py-0.5 rounded bg-black/40 border border-rose-500/30"
+                      title="Remove Bot"
+                    >
+                      ✕ Remove
+                    </button>
+                  )}
+                </div>
               ))}
 
               {/* Empty Slots */}
               {emptySlots.map((_, index) => (
                 <div
                   key={`empty-${index}`}
-                  className="rounded-xl border-2 border-dashed border-slate-800 p-4 flex items-center justify-center text-slate-600 text-xs font-medium bg-slate-950/20"
+                  className="rounded-2xl border-2 border-dashed border-[#1f4d36] p-4 flex items-center justify-center text-slate-500 text-xs font-medium bg-[#081a12]/30"
                 >
                   Waiting for player {playerCount + index + 1}...
                 </div>
@@ -151,16 +178,16 @@ export const Lobby: React.FC<LobbyProps> = ({
 
             {/* Non-host self ready toggle row */}
             {!isHost && (
-              <div className="mt-5 pt-4 border-t border-slate-800 flex items-center justify-between">
-                <span className="text-xs text-slate-400">
+              <div className="mt-5 pt-4 border-t border-[#1b3d2b] flex items-center justify-between">
+                <span className="text-xs text-slate-300">
                   Status: {currentPlayer.isReady ? 'You are ready!' : 'Mark yourself ready when set'}
                 </span>
                 <button
                   onClick={handleToggleReady}
                   className={`px-5 py-2 rounded-xl text-xs font-bold transition-all shadow ${
                     currentPlayer.isReady
-                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950'
-                      : 'bg-amber-500 hover:bg-amber-400 text-slate-950'
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold'
+                      : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold'
                   }`}
                 >
                   {currentPlayer.isReady ? 'Ready ✓ (Click to Cancel)' : 'Mark Ready'}
@@ -172,111 +199,88 @@ export const Lobby: React.FC<LobbyProps> = ({
 
         {/* Right Col: Host Win-Mode Selector & Game Start */}
         <div className="space-y-4">
-          <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 md:p-6 shadow-xl flex flex-col justify-between h-full">
+          <div className="bg-[#102b1e]/90 border border-[#1f4d36] rounded-3xl p-5 md:p-6 shadow-2xl flex flex-col justify-between h-full">
             <div>
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-heading text-base font-bold text-slate-100 uppercase tracking-wide">
-                  Win Condition
+                  Victory Rules
                 </h3>
                 {isHost ? (
-                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-400 border border-amber-500/30">
-                    Host Setting
+                  <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    Host Control
                   </span>
                 ) : (
-                  <span className="text-[10px] text-slate-400">Synced with host</span>
+                  <span className="text-[10px] text-slate-400">Synced</span>
                 )}
               </div>
 
-              {/* Mode 1: Standard No Mercy */}
+              {/* Mode 1 */}
               <div
                 onClick={() => isHost && handleModeChange(WinMode.STANDARD_NO_MERCY)}
-                className={`p-4 rounded-xl border-2 transition-all mb-3 ${
+                className={`p-4 rounded-2xl border-2 transition-all mb-3 ${
                   isHost ? 'cursor-pointer' : ''
                 } ${
                   room.winMode === WinMode.STANDARD_NO_MERCY
-                    ? 'bg-amber-500/10 border-amber-400 ring-2 ring-amber-400/20 shadow-lg shadow-amber-500/5'
-                    : 'bg-slate-950/60 border-slate-800 opacity-70 hover:border-slate-700'
+                    ? 'bg-[#184a32] border-amber-400 ring-2 ring-amber-400/20 shadow-lg'
+                    : 'bg-[#0b2318] border-[#1f4d36] opacity-75 hover:opacity-100'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-sm text-slate-100">
-                    Mode 1: Standard No Mercy
+                    Standard No Mercy
                   </span>
                   {room.winMode === WinMode.STANDARD_NO_MERCY && (
                     <span className="text-amber-400 text-xs font-black">✓ Active</span>
                   )}
                 </div>
                 <div className="text-xs text-slate-300 mt-2 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-amber-400">▪</span>
-                    <span><strong>3 Complete Sets</strong> (different colors)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-emerald-400">▪</span>
-                    <span><strong>$10M+ Cash</strong> in Bank</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-blue-400">▪</span>
-                    <span><strong>All 3 Debt Chips</strong> held</span>
-                  </div>
+                  <div>▪ <strong>3 Complete Sets</strong> (different colors)</div>
+                  <div>▪ <strong>$10M+ Cash</strong> in Bank</div>
+                  <div>▪ <strong>All 3 Debt Chips</strong> held</div>
                 </div>
               </div>
 
-              {/* Mode 2: Extended No Mercy */}
+              {/* Mode 2 */}
               <div
                 onClick={() => isHost && handleModeChange(WinMode.EXTENDED_NO_MERCY)}
-                className={`p-4 rounded-xl border-2 transition-all ${
+                className={`p-4 rounded-2xl border-2 transition-all ${
                   isHost ? 'cursor-pointer' : ''
                 } ${
                   room.winMode === WinMode.EXTENDED_NO_MERCY
-                    ? 'bg-rose-500/10 border-rose-400 ring-2 ring-rose-400/20 shadow-lg shadow-rose-500/5'
-                    : 'bg-slate-950/60 border-slate-800 opacity-70 hover:border-slate-700'
+                    ? 'bg-[#184a32] border-amber-400 ring-2 ring-amber-400/20 shadow-lg'
+                    : 'bg-[#0b2318] border-[#1f4d36] opacity-75 hover:opacity-100'
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-bold text-sm text-slate-100">
-                    Mode 2: Extended No Mercy
+                    Extended No Mercy
                   </span>
                   {room.winMode === WinMode.EXTENDED_NO_MERCY && (
-                    <span className="text-rose-400 text-xs font-black">✓ Active</span>
+                    <span className="text-amber-400 text-xs font-black">✓ Active</span>
                   )}
                 </div>
                 <div className="text-xs text-slate-300 mt-2 space-y-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-rose-400">▪</span>
-                    <span><strong>4 Complete Sets</strong> (different colors)</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-emerald-400">▪</span>
-                    <span><strong>$20M+ Cash</strong> in Bank</span>
-                  </div>
-                  <div className="flex items-center gap-1.5">
-                    <span className="text-blue-400">▪</span>
-                    <span><strong>All 3 Debt Chips</strong> held</span>
-                  </div>
+                  <div>▪ <strong>4 Complete Sets</strong> (different colors)</div>
+                  <div>▪ <strong>$20M+ Cash</strong> in Bank</div>
+                  <div>▪ <strong>All 3 Debt Chips</strong> held</div>
                 </div>
               </div>
             </div>
 
             {/* Host Start Game Controls */}
-            <div className="mt-6 pt-4 border-t border-slate-800">
+            <div className="mt-6 pt-4 border-t border-[#1b3d2b]">
               {isHost ? (
                 <div>
                   <button
                     onClick={handleStartGame}
                     disabled={!canStart}
-                    className="w-full py-3.5 px-4 rounded-xl font-heading font-bold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-300 hover:to-amber-500 transition-all shadow-lg shadow-amber-500/20 active:scale-[0.99] disabled:opacity-40 disabled:pointer-events-none uppercase tracking-wider text-base"
+                    className="w-full py-3.5 px-4 rounded-2xl font-heading font-extrabold text-slate-950 bg-gradient-to-r from-amber-400 via-amber-500 to-amber-600 hover:from-amber-300 hover:to-amber-500 transition-all shadow-xl shadow-amber-500/20 active:scale-[0.99] disabled:opacity-40 disabled:pointer-events-none uppercase tracking-wider text-base border border-amber-300"
                   >
                     Start Game
                   </button>
                   {!canStartCount && (
-                    <p className="text-[11px] text-slate-500 text-center mt-2">
-                      Need at least 2 players to start
-                    </p>
-                  )}
-                  {canStartCount && !allNonHostsReady && (
-                    <p className="text-[11px] text-amber-400/80 text-center mt-2">
-                      Waiting for all players to click "Ready"
+                    <p className="text-[11px] text-amber-300/80 text-center mt-2">
+                      Need at least 2 players (add a bot or invite a friend!)
                     </p>
                   )}
                 </div>
@@ -292,7 +296,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 
       {/* Footer */}
       <footer className="text-center text-xs text-slate-500 max-w-5xl mx-auto w-full pt-4">
-        Room code <span className="font-mono text-slate-400">{room.code}</span> • Share this code with friends to join (2 to 6 players)
+        Share the invite link with friends • Play live 2–6 players or add bots
       </footer>
     </div>
   );

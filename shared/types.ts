@@ -163,6 +163,9 @@ export interface Player {
   /** Index into a shared palette so every player gets a distinct color (0 to 5). */
   colorIndex: number;
 
+  /** Whether this player is an AI bot. */
+  isBot?: boolean;
+
   /** Cards currently in hand (hidden from opponents). */
   hand: Card[];
 
@@ -186,6 +189,7 @@ export interface PublicPlayerView {
   isHost: boolean;
   isReady: boolean;
   colorIndex: number;
+  isBot?: boolean;
 
   /** Total cash value currently stored in player's bank ($M). */
   bankTotal: number;
@@ -308,6 +312,10 @@ export const EVENT_PLAY_CARD        = 'play-card'        as const;
 export const EVENT_END_TURN         = 'end-turn'         as const;
 export const EVENT_DRAW_CARDS       = 'draw-cards'       as const;
 export const EVENT_LEAVE_ROOM       = 'leave-room'       as const;
+export const EVENT_SEND_EMOTE       = 'send-emote'       as const;
+export const EVENT_ADD_BOT          = 'add-bot'          as const;
+export const EVENT_REMOVE_BOT       = 'remove-bot'       as const;
+export const EVENT_FLIP_WILDCARD    = 'flip-wildcard'    as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
 export const EVENT_ROOM_JOINED      = 'room-joined'      as const;
@@ -317,6 +325,7 @@ export const EVENT_GAME_STATE_UPDATE= 'game-state-update'as const;
 export const EVENT_GAME_OVER        = 'game-over'        as const;
 export const EVENT_ERROR            = 'error'            as const;
 export const EVENT_HOST_CHANGED     = 'host-changed'     as const;
+export const EVENT_EMOTE_RECEIVED   = 'emote-received'   as const;
 
 export interface ClientToServerEvents {
   [EVENT_CREATE_ROOM]: (data: { displayName: string }) => void;
@@ -336,6 +345,10 @@ export interface ClientToServerEvents {
   [EVENT_END_TURN]: () => void;
   [EVENT_DRAW_CARDS]: () => void;
   [EVENT_LEAVE_ROOM]: () => void;
+  [EVENT_SEND_EMOTE]: (data: { emote: string }) => void;
+  [EVENT_ADD_BOT]: () => void;
+  [EVENT_REMOVE_BOT]: (data: { botId: string }) => void;
+  [EVENT_FLIP_WILDCARD]: (data: { cardId: string; toColor: PropertyColor }) => void;
 }
 
 export interface ServerToClientEvents {
@@ -352,4 +365,5 @@ export interface ServerToClientEvents {
   [EVENT_GAME_OVER]: (data: { winner: PublicPlayerView; breakdown: WinConditionResult }) => void;
   [EVENT_ERROR]: (data: { message: string }) => void;
   [EVENT_HOST_CHANGED]: (data: { newHostId: string; newHostName: string }) => void;
+  [EVENT_EMOTE_RECEIVED]: (data: { playerId: string; playerName: string; emote: string }) => void;
 }

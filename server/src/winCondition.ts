@@ -113,6 +113,7 @@ export function toPublicPlayerView(player: Player): PublicPlayerView {
     isHost: player.isHost,
     isReady: player.isReady,
     colorIndex: player.colorIndex,
+    isBot: player.isBot,
     bankTotal,
     bankCount: player.bank.length,
     handCount: player.hand.length,
