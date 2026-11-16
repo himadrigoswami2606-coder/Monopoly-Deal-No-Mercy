@@ -24,6 +24,7 @@ import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
 import { HandCardSlider } from './HandCardSlider';
 import { ActionNotificationWindow } from './ActionNotificationWindow';
+import { MiniBankStack } from './MiniBankStack';
 import { ActionTargetModal } from './ActionTargetModal';
 import { ActionReactionModal } from './ActionReactionModal';
 import { WildcardSelectModal } from './WildcardSelectModal';
@@ -374,10 +375,39 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     >
                       {opp.displayName.charAt(0).toUpperCase()}
                     </div>
-                    <div className="flex items-center gap-1.5 text-xs">
-                      <span className="font-bold text-slate-100">{opp.displayName}</span>
-                      <span className="text-slate-400 font-mono text-[11px]">
-                        {opp.completeSetsCount}/3 • ${opp.bankTotal}M • {opp.handCount}c
+                    <div className="flex items-center gap-2 text-xs flex-wrap">
+                      <span className="font-heading font-black text-slate-100 flex items-center gap-1">
+                        {opp.isBot ? '🤖' : null}
+                        {opp.displayName}
+                      </span>
+
+                      {/* Clearly Visible Hand Count */}
+                      <span
+                        className="bg-[#091a11] border border-[#1f4d36] px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-200 flex items-center gap-1 shadow-sm"
+                        title={`${opp.handCount} cards in hand`}
+                      >
+                        <span>🃏</span>
+                        <span className="text-amber-400 font-black">{opp.handCount}</span>
+                        <span className="text-slate-400 text-[9px] uppercase font-mono">cards</span>
+                      </span>
+
+                      {/* Clearly Visible Sets Completed */}
+                      <span
+                        className="bg-[#091a11] border border-emerald-500/40 px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-200 flex items-center gap-1 shadow-sm"
+                        title={`${opp.completeSetsCount}/3 property sets completed`}
+                      >
+                        <span>🏆</span>
+                        <span className="text-emerald-400 font-black">{opp.completeSetsCount}/3</span>
+                        <span className="text-slate-400 text-[9px] uppercase font-mono">sets</span>
+                      </span>
+
+                      {/* Clearly Visible Bank Total */}
+                      <span
+                        className="bg-[#091a11] border border-amber-500/40 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-300 font-mono flex items-center gap-1 shadow-sm"
+                        title={`Bank: $${opp.bankTotal}M (${opp.bankCards?.length || 0} cards)`}
+                      >
+                        <span>🏦</span>
+                        <span className="font-black">${opp.bankTotal}M</span>
                       </span>
                     </div>
                     {/* Chips Indicator with 6-color Palette (Point 10) */}
@@ -410,67 +440,84 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     </div>
                   </div>
 
-                  {/* Opponent's Laid Down Table Row (Screenshot 3) */}
+                  {/* Opponent's Laid Down Table Row with Dedicated Bank Section */}
                   <div className="w-full mt-2 bg-[#0d261b]/80 border border-[#1b3d2b] rounded-2xl p-2.5 shadow-inner">
-                    <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1 flex justify-between px-1">
-                      <span>{opp.displayName.toUpperCase()}'S TABLE</span>
-                      <span className="text-slate-500">
+                    <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2 flex justify-between px-1 border-b border-[#1b3d2b] pb-1.5">
+                      <span className="flex items-center gap-1.5 text-amber-200">
+                        <span className="text-amber-400">●</span>
+                        <span>{opp.displayName.toUpperCase()}'S TABLE</span>
+                      </span>
+                      <span className="text-slate-400 font-mono text-[9px]">
                         {opp.completeSetsCount} complete • {opp.properties.length} sets
                       </span>
                     </div>
 
-                    {opp.properties.length === 0 ? (
-                      <div className="text-[11px] text-slate-500 italic py-1 text-center">
-                        no sets played
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
+                      {/* Opponent Bank Section (Shows total + latest deposited money card) */}
+                      <div className="bg-[#081a12]/90 border border-[#1f4d36] rounded-xl p-2 shadow-sm flex-shrink-0">
+                        <MiniBankStack
+                          totalAmount={opp.bankTotal}
+                          cards={opp.bankCards || []}
+                          playerName={opp.displayName}
+                        />
                       </div>
-                    ) : (
-                      <div className="flex flex-wrap gap-2 pt-1">
-                        {opp.properties.map((set, sIdx) => {
-                          const meta = PROPERTY_CONFIG[set.color];
-                          const count = set.cards.length;
-                          const baseRent =
-                            meta?.rentValues?.[Math.min(count - 1, (meta?.rentValues?.length || 1) - 1)] || 1;
-                          const totalRent =
-                            baseRent + (set.shack ? 3 : 0) + (set.house ? 3 : 0) + (set.hotel ? 4 : 0);
 
-                          return (
-                            <div
-                              key={sIdx}
-                              className="bg-[#081a12] border border-black/40 rounded-lg p-1.5 min-w-[95px] shadow"
-                            >
-                              <div
-                                className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex justify-between"
-                                style={{
-                                  backgroundColor: meta?.hexColor,
-                                  color: meta?.textColor,
-                                }}
-                              >
-                                <span className="truncate">{meta?.name}</span>
-                                <span>
-                                  {set.cards.length}/{meta?.setSize}
-                                </span>
-                              </div>
+                      {/* Opponent's Property Sets */}
+                      <div className="flex-1 overflow-x-auto w-full">
+                        {opp.properties.length === 0 ? (
+                          <div className="text-[11px] text-slate-500 italic py-3 text-center bg-black/20 rounded-xl border border-dashed border-[#1b3d2b]">
+                            no property sets played yet
+                          </div>
+                        ) : (
+                          <div className="flex flex-wrap gap-2 pt-1">
+                            {opp.properties.map((set, sIdx) => {
+                              const meta = PROPERTY_CONFIG[set.color];
+                              const count = set.cards.length;
+                              const baseRent =
+                                meta?.rentValues?.[Math.min(count - 1, (meta?.rentValues?.length || 1) - 1)] || 1;
+                              const totalRent =
+                                baseRent + (set.shack ? 3 : 0) + (set.house ? 3 : 0) + (set.hotel ? 4 : 0);
 
-                              {/* Rent & Shack Display */}
-                              <div className="text-[8px] text-emerald-400 font-mono font-bold text-center mb-1 bg-black/40 rounded py-0.2">
-                                Rent: ${totalRent}M {set.shack ? '(Shack)' : ''}
-                              </div>
-
-                              <div className="space-y-0.5">
-                                {set.cards.map((c) => (
+                              return (
+                                <div
+                                  key={sIdx}
+                                  className="bg-[#081a12] border border-black/40 rounded-lg p-1.5 min-w-[95px] shadow"
+                                >
                                   <div
-                                    key={c.id}
-                                    className="text-[9px] text-slate-300 truncate bg-slate-950/60 px-1 py-0.2 rounded"
+                                    className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex justify-between"
+                                    style={{
+                                      backgroundColor: meta?.hexColor,
+                                      color: meta?.textColor,
+                                    }}
                                   >
-                                    {c.name}
+                                    <span className="truncate">{meta?.name}</span>
+                                    <span>
+                                      {set.cards.length}/{meta?.setSize}
+                                    </span>
                                   </div>
-                                ))}
-                              </div>
-                            </div>
-                          );
-                        })}
+
+                                  {/* Rent & Shack Display */}
+                                  <div className="text-[8px] text-emerald-400 font-mono font-bold text-center mb-1 bg-black/40 rounded py-0.2">
+                                    Rent: ${totalRent}M {set.shack ? '(Shack)' : ''}
+                                  </div>
+
+                                  <div className="space-y-0.5">
+                                    {set.cards.map((c) => (
+                                      <div
+                                        key={c.id}
+                                        className="text-[9px] text-slate-300 truncate bg-slate-950/60 px-1 py-0.2 rounded"
+                                      >
+                                        {c.name}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )}
                       </div>
-                    )}
+                    </div>
                   </div>
                 </div>
               );
@@ -538,14 +585,42 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           {/* Console Header Bar */}
           <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-[#1b3d2b] mb-3">
             {/* Player Pill (Screenshot 3) */}
-            <div className="flex items-center gap-2.5 bg-[#184a32] px-3.5 py-1.5 rounded-full border border-[#2d6a4f] shadow-sm">
+            <div className="flex items-center gap-2.5 bg-[#184a32] px-3.5 py-1.5 rounded-full border border-[#2d6a4f] shadow-sm flex-wrap">
               <div className="w-7 h-7 rounded-full bg-amber-400 text-slate-950 font-bold flex items-center justify-center text-sm shadow">
                 {myPlayer.displayName.charAt(0).toUpperCase()}
               </div>
-              <div className="flex items-center gap-2 text-xs">
-                <span className="font-bold text-slate-100">{myPlayer.displayName} (you)</span>
-                <span className="text-emerald-300 font-mono font-bold">
-                  ${myBankTotal}M • {myCompleteSetsCount}/3 sets • {myHand.length}c
+              <div className="flex items-center gap-2 text-xs flex-wrap">
+                <span className="font-heading font-black text-slate-100">{myPlayer.displayName} (you)</span>
+
+                {/* Clearly Visible Bank Badge */}
+                <span
+                  className="bg-[#091a11] border border-amber-500/40 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-emerald-300 font-mono flex items-center gap-1 shadow-sm"
+                  title={`Your Bank: $${myBankTotal}M (${myPlayer.bank.length} cards)`}
+                >
+                  <span>🏦</span>
+                  <span className="font-black">${myBankTotal}M</span>
+                </span>
+
+                {/* Clearly Visible Sets Badge */}
+                <span
+                  className="bg-[#091a11] border border-emerald-500/40 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-slate-200 flex items-center gap-1 shadow-sm"
+                  title={`${myCompleteSetsCount}/3 completed sets`}
+                >
+                  <span>🏆</span>
+                  <span className="text-emerald-400 font-black">{myCompleteSetsCount}/3</span>
+                  <span className="text-slate-400 text-[9px] uppercase font-mono">sets</span>
+                </span>
+
+                {/* Clearly Visible Hand Badge */}
+                <span
+                  className="bg-[#091a11] border border-slate-700/80 px-2.5 py-0.5 rounded-full text-[10px] font-bold text-slate-200 flex items-center gap-1 shadow-sm"
+                  title={`${myHand.length} cards in your hand`}
+                >
+                  <span>🃏</span>
+                  <span className={`font-black ${myHand.length > 7 ? 'text-rose-400' : 'text-amber-400'}`}>
+                    {myHand.length}
+                  </span>
+                  <span className="text-slate-400 text-[9px] uppercase font-mono">cards</span>
                 </span>
               </div>
             </div>
