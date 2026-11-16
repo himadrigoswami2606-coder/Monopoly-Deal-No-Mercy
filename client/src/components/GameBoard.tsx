@@ -27,7 +27,6 @@ import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
 import { HandCardSlider } from './HandCardSlider';
 import { ActionNotificationWindow } from './ActionNotificationWindow';
-import { MiniBankStack } from './MiniBankStack';
 import { ActionTargetModal } from './ActionTargetModal';
 import { ActionReactionModal } from './ActionReactionModal';
 import { WildcardSelectModal } from './WildcardSelectModal';
@@ -37,6 +36,7 @@ import { RepossessModal } from './RepossessModal';
 import { TaxCollectorModal } from './TaxCollectorModal';
 import { BankInspectorModal } from './BankInspectorModal';
 import { PropertySetInspectorModal } from './PropertySetInspectorModal';
+import { PlayerPropertiesModal } from './PlayerPropertiesModal';
 import { PLAYER_COLORS } from './PlayerCard';
 import { getDebtChipTheme } from '../utils/debtChipThemes';
 import { sounds } from '../utils/audio';
@@ -71,6 +71,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     ownerName: string;
     set: PropertySet;
     isOwner: boolean;
+  } | null>(null);
+  const [inspectingPlayerProperties, setInspectingPlayerProperties] = useState<{
+    playerName: string;
+    properties: PropertySet[];
+    completeSetsCount: number;
+    isSelf: boolean;
   } | null>(null);
 
   // Staged debt settlement from turn start draw (Points 4 & 5)
@@ -379,197 +385,183 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       {/* 2. MAIN TABLE FELT AREA                                             */}
       {/* ─────────────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col justify-between p-3 md:p-6 relative">
-        {/* OPPONENTS' PEDESTALS (TOP CENTER) */}
-        <div className="w-full max-w-5xl mx-auto mb-4">
-          <div className="flex flex-wrap items-center justify-center gap-4">
-            {opponents.map((opp) => {
-              const oppColor = PLAYER_COLORS[opp.colorIndex % PLAYER_COLORS.length];
-              const isOppTurn = opp.id === gameState.activePlayerId;
+        {/* ─────────────────────────────────────────────────────────────────── */}
+        {/* OPPONENTS' TABLE PODS RING (FITS ON ONE SCREEN WITHOUT SCROLLING)   */}
+        {/* ─────────────────────────────────────────────────────────────────── */}
+        <div
+          className={`w-full mx-auto mb-2 md:mb-3 transition-all ${
+            opponents.length <= 2
+              ? 'max-w-2xl flex flex-wrap justify-center gap-2.5'
+              : opponents.length <= 4
+              ? 'max-w-5xl grid grid-cols-2 md:grid-cols-4 gap-2.5'
+              : 'max-w-7xl grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2'
+          }`}
+        >
+          {opponents.map((opp) => {
+            const oppColor = PLAYER_COLORS[opp.colorIndex % PLAYER_COLORS.length];
+            const isOppTurn = opp.id === gameState.activePlayerId;
 
-              return (
-                <div key={opp.id} className="flex flex-col items-center">
-                  {/* Opponent Pill (Screenshot 3) */}
-                  <div
-                    className={`flex items-center gap-2.5 px-3 py-1.5 rounded-full border transition-all ${
-                      isOppTurn
-                        ? 'bg-[#184a32] border-amber-400 ring-2 ring-amber-400/50 shadow-lg shadow-amber-500/20'
-                        : 'bg-[#102b1e]/90 border-[#1f4d36]'
-                    }`}
-                  >
+            return (
+              <div
+                key={opp.id}
+                className={`relative p-2.5 md:p-3 rounded-2xl border transition-all shadow-xl bg-[#0c2217]/95 backdrop-blur-md flex flex-col justify-between ${
+                  isOppTurn
+                    ? 'border-amber-400 ring-2 ring-amber-400/50 shadow-amber-500/20'
+                    : 'border-[#1b3d2b] hover:border-[#2d6a4f]'
+                }`}
+              >
+                {/* Top Row: Avatar + Name + Turn Glow + Bot badge + Debt Chips */}
+                <div className="flex items-center justify-between gap-1.5 mb-2 pb-1.5 border-b border-[#183a29]">
+                  <div className="flex items-center gap-1.5 truncate">
                     <div
-                      className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs text-slate-950 ${oppColor.bg}`}
+                      className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs text-slate-950 shadow flex-shrink-0 ${oppColor.bg}`}
                     >
                       {opp.displayName.charAt(0).toUpperCase()}
                     </div>
-                    <div className="flex items-center gap-2 text-xs flex-wrap">
-                      <span className="font-heading font-black text-slate-100 flex items-center gap-1">
-                        {opp.isBot ? '🤖' : null}
-                        {opp.displayName}
-                      </span>
-
-                      {/* Clearly Visible Hand Count */}
-                      <span
-                        className="bg-[#091a11] border border-[#1f4d36] px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-200 flex items-center gap-1 shadow-sm"
-                        title={`${opp.handCount} cards in hand`}
-                      >
-                        <span>🃏</span>
-                        <span className="text-amber-400 font-black">{opp.handCount}</span>
-                        <span className="text-slate-400 text-[9px] uppercase font-mono">cards</span>
-                      </span>
-
-                      {/* Clearly Visible Sets Completed */}
-                      <span
-                        className="bg-[#091a11] border border-emerald-500/40 px-2 py-0.5 rounded-full text-[10px] font-bold text-slate-200 flex items-center gap-1 shadow-sm"
-                        title={`${opp.completeSetsCount}/3 property sets completed`}
-                      >
-                        <span>🏆</span>
-                        <span className="text-emerald-400 font-black">{opp.completeSetsCount}/3</span>
-                        <span className="text-slate-400 text-[9px] uppercase font-mono">sets</span>
-                      </span>
-
-                      {/* Clearly Visible Bank Total */}
-                      <span
-                        className="bg-[#091a11] border border-amber-500/40 px-2 py-0.5 rounded-full text-[10px] font-bold text-emerald-300 font-mono flex items-center gap-1 shadow-sm"
-                        title={`Bank: $${opp.bankTotal}M (${opp.bankCards?.length || 0} cards)`}
-                      >
-                        <span>🏦</span>
-                        <span className="font-black">${opp.bankTotal}M</span>
-                      </span>
-                    </div>
-                    {/* Chips Indicator with 6-color Palette (Point 10) */}
-                    <div className="flex items-center gap-1">
-                      {opp.debtChips && opp.debtChips.length > 0 ? (
-                        opp.debtChips.map((chip) => {
-                          const owner =
-                            players.find((p) => p.id === chip.ownerId) ||
-                            (chip.ownerId === myPlayer.id ? myPlayer : null);
-                          const ownerColor = owner?.colorIndex ?? 0;
-                          const theme = getDebtChipTheme(ownerColor);
-                          const isOwn = chip.ownerId === opp.id;
-                          return (
-                            <span
-                              key={chip.id}
-                              title={
-                                isOwn
-                                  ? `${opp.displayName}'s Debt Chip (${theme.name})`
-                                  : `${owner?.displayName || 'Player'}'s Debt Chip (Held by ${opp.displayName})`
-                              }
-                              className={`px-1.5 py-0.5 rounded-full border text-[9px] font-bold shadow ${theme.gradient} ${theme.border} ${theme.text}`}
-                            >
-                              🪙 {isOwn ? 'Own' : owner?.displayName?.slice(0, 5)}
-                            </span>
-                          );
-                        })
-                      ) : (
-                        <span className="text-[10px] text-slate-500 font-mono">0 chips</span>
+                    <div className="truncate">
+                      <div className="font-heading font-black text-xs text-slate-100 truncate flex items-center gap-1">
+                        {opp.isBot && <span title="AI Bot">🤖</span>}
+                        <span className="truncate">{opp.displayName}</span>
+                      </div>
+                      {isOppTurn && (
+                        <div className="text-[8.5px] text-amber-400 font-bold uppercase tracking-wider animate-pulse leading-none">
+                          Playing turn...
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Opponent's Laid Down Table Row with Dedicated Bank Section */}
-                  <div className="w-full mt-2 bg-[#0d261b]/80 border border-[#1b3d2b] rounded-2xl p-2.5 shadow-inner">
-                    <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2 flex justify-between px-1 border-b border-[#1b3d2b] pb-1.5">
-                      <span className="flex items-center gap-1.5 text-amber-200">
-                        <span className="text-amber-400">●</span>
-                        <span>{opp.displayName.toUpperCase()}'S TABLE</span>
-                      </span>
-                      <span className="text-slate-400 font-mono text-[9px]">
-                        {opp.completeSetsCount} complete • {opp.properties.length} sets
-                      </span>
-                    </div>
-
-                    <div className="flex flex-col sm:flex-row items-start sm:items-center gap-3">
-                      {/* Opponent Bank Section (Shows total + latest deposited money card) */}
-                      <div className="bg-[#081a12]/90 border border-[#1f4d36] rounded-xl p-2 shadow-sm flex-shrink-0">
-                        <MiniBankStack
-                          totalAmount={opp.bankTotal}
-                          cards={opp.bankCards || []}
-                          playerName={opp.displayName}
-                          onClick={() =>
-                            setInspectingBank({
-                              playerName: opp.displayName,
-                              totalAmount: opp.bankTotal,
-                              cards: opp.bankCards || [],
-                              isSelf: false,
-                            })
-                          }
-                        />
-                      </div>
-
-                      {/* Opponent's Property Sets */}
-                      <div className="flex-1 overflow-x-auto w-full">
-                        {opp.properties.length === 0 ? (
-                          <div className="text-[11px] text-slate-500 italic py-3 text-center bg-black/20 rounded-xl border border-dashed border-[#1b3d2b]">
-                            no property sets played yet
-                          </div>
-                        ) : (
-                          <div className="flex flex-wrap gap-2 pt-1">
-                            {opp.properties.map((set, sIdx) => {
-                              const meta = PROPERTY_CONFIG[set.color];
-                              const count = set.cards.length;
-                              const baseRent =
-                                meta?.rentValues?.[Math.min(count - 1, (meta?.rentValues?.length || 1) - 1)] || 1;
-                              const totalRent =
-                                baseRent + (set.shack ? 3 : 0) + (set.house ? 3 : 0) + (set.hotel ? 4 : 0);
-
-                              return (
-                                <div
-                                  key={sIdx}
-                                  onClick={() =>
-                                    setInspectingPropertySet({
-                                      ownerName: `${opp.displayName}'s`,
-                                      set,
-                                      isOwner: false,
-                                    })
-                                  }
-                                  role="button"
-                                  tabIndex={0}
-                                  className="bg-[#081a12] border border-black/40 hover:border-amber-400/50 rounded-xl p-2 min-w-[105px] shadow cursor-pointer transition-all hover:scale-105 active:scale-95 group select-none"
-                                  title="Click to inspect this property set"
-                                >
-                                  <div
-                                    className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex justify-between shadow-sm"
-                                    style={{
-                                      backgroundColor: meta?.hexColor,
-                                      color: meta?.textColor,
-                                    }}
-                                  >
-                                    <span className="truncate">{meta?.name}</span>
-                                    <span>
-                                      {set.cards.length}/{meta?.setSize}
-                                    </span>
-                                  </div>
-
-                                  {/* Rent & Shack Display */}
-                                  <div className="text-[8px] text-emerald-400 font-mono font-bold text-center mb-1 bg-black/40 rounded py-0.5 border border-emerald-500/20">
-                                    Rent: ${totalRent}M {set.shack ? '(Shack)' : ''}
-                                  </div>
-
-                                  <div className="space-y-0.5">
-                                    {set.cards.map((c) => (
-                                      <div
-                                        key={c.id}
-                                        className="text-[9px] text-slate-300 truncate bg-slate-950/60 px-1 py-0.2 rounded"
-                                      >
-                                        {c.name}
-                                      </div>
-                                    ))}
-                                  </div>
-                                  <div className="text-[7.5px] text-center text-amber-300/80 font-bold uppercase tracking-wider mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                                    👁️ Inspect
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        )}
-                      </div>
-                    </div>
+                  {/* Debt Chips held */}
+                  <div className="flex items-center gap-0.5 flex-shrink-0">
+                    {opp.debtChips && opp.debtChips.length > 0 ? (
+                      opp.debtChips.map((chip) => {
+                        const owner =
+                          players.find((p) => p.id === chip.ownerId) ||
+                          (chip.ownerId === myPlayer.id ? myPlayer : null);
+                        const ownerColor = owner?.colorIndex ?? 0;
+                        const theme = getDebtChipTheme(ownerColor);
+                        const isOwn = chip.ownerId === opp.id;
+                        return (
+                          <span
+                            key={chip.id}
+                            title={
+                              isOwn
+                                ? `${opp.displayName}'s Debt Chip (${theme.name})`
+                                : `${owner?.displayName || 'Player'}'s Debt Chip`
+                            }
+                            className={`w-4 h-4 rounded-full border flex items-center justify-center text-[8px] font-bold shadow ${theme.gradient} ${theme.border} ${theme.text}`}
+                          >
+                            🪙
+                          </span>
+                        );
+                      })
+                    ) : (
+                      <span className="text-[8.5px] text-slate-500">0 chips</span>
+                    )}
                   </div>
                 </div>
-              );
-            })}
-          </div>
+
+                {/* Middle Row: Quick Stats Badges (Hand count, Sets completed, Bank total) */}
+                <div className="grid grid-cols-3 gap-1 mb-2 text-center text-[10px]">
+                  <div
+                    className="bg-[#081a12] border border-[#1f4d36] rounded-lg py-0.5 px-1 flex flex-col items-center"
+                    title={`${opp.handCount} cards in hand`}
+                  >
+                    <span className="text-slate-400 text-[8px] uppercase font-mono">Hand</span>
+                    <span className="font-bold text-amber-400 text-[11px]">🃏 {opp.handCount}</span>
+                  </div>
+
+                  <div
+                    className="bg-[#081a12] border border-emerald-500/40 rounded-lg py-0.5 px-1 flex flex-col items-center"
+                    title={`${opp.completeSetsCount}/3 complete property sets`}
+                  >
+                    <span className="text-slate-400 text-[8px] uppercase font-mono">Sets</span>
+                    <span className="font-bold text-emerald-400 text-[11px]">
+                      🏆 {opp.completeSetsCount}/3
+                    </span>
+                  </div>
+
+                  <div
+                    className="bg-[#081a12] border border-amber-500/40 rounded-lg py-0.5 px-1 flex flex-col items-center"
+                    title={`Bank: $${opp.bankTotal}M (${opp.bankCards?.length || 0} cards)`}
+                  >
+                    <span className="text-slate-400 text-[8px] uppercase font-mono">Bank</span>
+                    <span className="font-bold text-emerald-300 font-mono text-[11px]">
+                      ${opp.bankTotal}M
+                    </span>
+                  </div>
+                </div>
+
+                {/* Colors Dots Preview Bar (Shows owned colors with Shack / Complete icons!) */}
+                {opp.properties.length > 0 ? (
+                  <div className="flex items-center gap-1 mb-2 px-1.5 py-0.5 bg-black/30 rounded-lg overflow-x-auto">
+                    <span className="text-[8px] text-slate-400 font-bold uppercase flex-shrink-0 mr-0.5">
+                      Sets:
+                    </span>
+                    {opp.properties.map((set, sIdx) => {
+                      const meta = PROPERTY_CONFIG[set.color];
+                      return (
+                        <div
+                          key={sIdx}
+                          title={`${meta?.name}: ${set.cards.length}/${meta?.setSize} cards ${set.isComplete ? '(COMPLETE!)' : ''} ${set.shack ? '(+ Shack)' : ''}`}
+                          className={`w-3.5 h-3.5 rounded-full border flex-shrink-0 flex items-center justify-center text-[7px] font-bold ${
+                            set.isComplete ? 'ring-1 ring-amber-300' : ''
+                          }`}
+                          style={{
+                            backgroundColor: meta?.hexColor,
+                            borderColor: set.isComplete ? '#fbbf24' : '#000',
+                          }}
+                        >
+                          {set.shack ? '🛖' : set.isComplete ? '✓' : ''}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="text-[9px] text-slate-500 italic text-center py-0.5 mb-2 bg-black/20 rounded">
+                    no properties yet
+                  </div>
+                )}
+
+                {/* Bottom Row: The TWO Requested Action Buttons */}
+                <div className="grid grid-cols-2 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setInspectingPlayerProperties({
+                        playerName: opp.displayName,
+                        properties: opp.properties || [],
+                        completeSetsCount: opp.completeSetsCount || 0,
+                        isSelf: false,
+                      })
+                    }
+                    className="py-1 px-1.5 bg-[#123624] hover:bg-[#1a4a32] text-amber-300 hover:text-amber-200 border border-[#23583c] hover:border-amber-400/60 rounded-xl text-[9.5px] font-heading font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 shadow active:scale-95 cursor-pointer"
+                    title={`View ${opp.displayName}'s properties, shacks, and sets`}
+                  >
+                    <span>🏰</span>
+                    <span className="truncate">Properties</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setInspectingBank({
+                        playerName: opp.displayName,
+                        totalAmount: opp.bankTotal,
+                        cards: opp.bankCards || [],
+                        isSelf: false,
+                      })
+                    }
+                    className="py-1 px-1.5 bg-[#102e20] hover:bg-[#17422f] text-emerald-300 hover:text-emerald-200 border border-[#1f4d36] hover:border-emerald-400/60 rounded-xl text-[9.5px] font-heading font-bold uppercase tracking-wider transition-all flex items-center justify-center gap-1 shadow active:scale-95 cursor-pointer"
+                    title={`Inspect ${opp.displayName}'s bank vault`}
+                  >
+                    <span>🏦</span>
+                    <span className="truncate">Bank</span>
+                  </button>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* CENTER TABLE: DRAW DECK & DISCARD PILE (Point 3: manual clicking disabled) */}
@@ -799,8 +791,23 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
               {/* Property Sets on Table (Points 3, 6, 7: Handsome card tiles + Inspect Modal) */}
               <div>
-                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">
-                  YOUR SETS • {myCompleteSetsCount} COMPLETE
+                <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1 flex items-center justify-between">
+                  <span>YOUR SETS • {myCompleteSetsCount} COMPLETE</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setInspectingPlayerProperties({
+                        playerName: 'Your',
+                        properties: myPlayer.properties || [],
+                        completeSetsCount: myCompleteSetsCount,
+                        isSelf: true,
+                      })
+                    }
+                    className="text-[9px] text-amber-300 hover:text-amber-200 font-bold hover:underline flex items-center gap-1 cursor-pointer bg-black/40 px-2 py-0.5 rounded-lg border border-amber-500/30 transition-colors"
+                  >
+                    <span>🏰</span>
+                    <span>View All Properties</span>
+                  </button>
                 </div>
 
                 {myPlayer.properties.length === 0 ? (
@@ -982,6 +989,21 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           onFlipWildcard={handleFlipWildcardDirect}
           onMoveShack={handleMoveShack}
           onClose={() => setInspectingPropertySet(null)}
+        />
+      )}
+
+      {/* 5D. FULL PLAYER PROPERTIES MODAL (See Properties for any player) */}
+      {inspectingPlayerProperties && (
+        <PlayerPropertiesModal
+          playerName={inspectingPlayerProperties.playerName}
+          properties={inspectingPlayerProperties.properties}
+          completeSetsCount={inspectingPlayerProperties.completeSetsCount}
+          isSelf={inspectingPlayerProperties.isSelf}
+          isMyTurn={isMyTurn}
+          playsRemaining={gameState.maxPlaysPerTurn - gameState.playsUsedThisTurn}
+          onFlipWildcard={handleFlipWildcardDirect}
+          onMoveShack={handleMoveShack}
+          onClose={() => setInspectingPlayerProperties(null)}
         />
       )}
 
