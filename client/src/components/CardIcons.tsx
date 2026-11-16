@@ -187,6 +187,20 @@ export const ActionIcon: React.FC<{ type: ActionType; className?: string }> = ({
         </svg>
       );
 
+    case ActionType.SHACK:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          {/* Wooden Shack */}
+          <polygon points="32,8 10,26 54,26" fill="#854d0e" stroke="#713f12" strokeWidth="2" />
+          <rect x="14" y="26" width="36" height="26" fill="#a16207" stroke="#713f12" strokeWidth="2" />
+          <rect x="27" y="36" width="10" height="16" fill="#451a03" />
+          <rect x="18" y="30" width="6" height="6" fill="#fef08a" stroke="#713f12" strokeWidth="1" />
+          <rect x="40" y="30" width="6" height="6" fill="#fef08a" stroke="#713f12" strokeWidth="1" />
+          {/* Chimney */}
+          <rect x="42" y="10" width="6" height="10" fill="#78350f" stroke="#451a03" strokeWidth="1" />
+        </svg>
+      );
+
     case ActionType.HOUSE:
       return (
         <svg viewBox="0 0 64 64" className={className} fill="none">

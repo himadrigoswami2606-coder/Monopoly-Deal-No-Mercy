@@ -32,7 +32,7 @@ export function checkWinCondition(
 ): WinConditionResult {
   const isExtended = winMode === WinMode.EXTENDED_NO_MERCY;
   const requiredSets = isExtended ? 4 : 3;
-  const requiredBank = isExtended ? 20 : 10;
+  const requiredBank = isExtended ? 10 : 0;
   const requiredChips = 3;
 
   // 1. Calculate complete property sets of different colors
@@ -68,7 +68,7 @@ export function checkWinCondition(
 
   const details: string[] = [
     `Property Sets: ${completeSets}/${requiredSets} ${setsMet ? '✓' : '✗'} (${completedColors.map((c) => PROPERTY_CONFIG[c]?.name || c).join(', ') || 'None'})`,
-    `Bank Cash: $${bankTotal}M/$${requiredBank}M ${bankMet ? '✓' : '✗'}`,
+    requiredBank > 0 ? `Bank Cash: $${bankTotal}M/$${requiredBank}M ${bankMet ? '✓' : '✗'}` : `Bank Cash: $${bankTotal}M (Defence Funds)`,
     `Owned Debt Chips: ${ownedChipsHeld}/${requiredChips} ${chipsMet ? '✓' : '✗'}`,
   ];
 

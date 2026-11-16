@@ -8,7 +8,8 @@ interface RulesHelpModalProps {
 }
 
 export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
-  const [activeTab, setActiveTab] = useState<'rules' | 'actions' | 'properties' | 'debt'>('rules');
+  const [activeTab, setActiveTab] = useState<'rules' | 'actions' | 'properties' | 'debt' | 'leaflet'>('rules');
+  const [leafletSide, setLeafletSide] = useState<'front' | 'back'>('front');
 
   const actionGuides: {
     type: ActionType;
@@ -55,8 +56,16 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
       name: 'Super Sly Deal',
       cashValue: 3,
       count: 2,
-      rule: 'Steal an entire COMPLETE property set (including any attached Houses and Hotels) from an opponent!',
-      tip: 'The deadliest card in No Mercy. Can instantly win you the game or dismantle a winning opponent.',
+      rule: 'Choose one color. Steal ALL properties, even complete sets, in that color from EACH player collection! (Steals matching Two-Color Wilds and Every-Color Wilds too!)',
+      tip: 'The deadliest card in No Mercy. One play can steal entire color groups from every single player simultaneously!',
+    },
+    {
+      type: ActionType.SHACK,
+      name: 'Shack',
+      cashValue: 3,
+      count: 3,
+      rule: 'Place on ANY property in your collection (single property, incomplete set, or complete set) to collect +$5M more rent when you play Rent or Double Rent!',
+      tip: 'Can be placed on any property right away! If you double rent, add the Shack +$5M first, then double the whole amount!',
     },
     {
       type: ActionType.SLY_DEAL,
@@ -127,8 +136,8 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
       name: 'Tough Luck',
       cashValue: 3,
       count: 2,
-      rule: 'Choose 1 opponent and a card category (Money, Property, or Action). They must discard ALL cards of that type from their hand!',
-      tip: 'Wipes out defensive Just Say No action cards before you strike with Super Sly Deal.',
+      rule: 'Choose a player and steal ALL property, action, or money cards from their hand directly into your hand!',
+      tip: 'The ultimate hand robbery. Snatch an opponent entire hand of money, properties, or actions!',
     },
     {
       type: ActionType.HOUSE,
@@ -175,9 +184,10 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
         {/* Tab Buttons */}
         <div className="flex gap-2 border-b border-[#1f4d36] pb-3 mb-4 overflow-x-auto">
           {[
+            { id: 'leaflet', label: '📜 Official Rulebook Photos', count: 2 },
             { id: 'rules', label: '📖 Core Rules', count: null },
             { id: 'debt', label: '🪙 Debt Chips', count: null },
-            { id: 'actions', label: '⚡ Action Cards', count: 14 },
+            { id: 'actions', label: '⚡ Action Cards', count: 15 },
             { id: 'properties', label: '🏘️ Properties & Wilds', count: 10 },
           ].map((tab) => (
             <button
@@ -201,6 +211,68 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
 
         {/* Tab Content */}
         <div className="flex-1 overflow-y-auto pr-1 space-y-4 text-xs">
+          {/* TAB 0: OFFICIAL RULEBOOK SCANS */}
+          {activeTab === 'leaflet' && (
+            <div className="space-y-4 animate-fade-in">
+              <div className="bg-[#0b2318] p-4 rounded-2xl border border-[#1f4d36] space-y-3">
+                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-[#1b3d2b]">
+                  <div>
+                    <h3 className="font-heading font-black text-amber-400 text-sm uppercase tracking-wide">
+                      Official Hasbro Monopoly Deal: No Mercy Rule Leaflet
+                    </h3>
+                    <p className="text-[11px] text-slate-300">
+                      Exact printed rules scanned directly from the game box.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={() => setLeafletSide('front')}
+                      className={`px-3 py-1.5 rounded-xl font-heading font-bold text-xs transition-all uppercase ${
+                        leafletSide === 'front'
+                          ? 'bg-amber-400 text-slate-950 shadow'
+                          : 'bg-[#102b1e] text-slate-300 hover:text-white border border-[#1f4d36]'
+                      }`}
+                    >
+                      📄 Page 1: Setup, Play & Debt
+                    </button>
+                    <button
+                      onClick={() => setLeafletSide('back')}
+                      className={`px-3 py-1.5 rounded-xl font-heading font-bold text-xs transition-all uppercase ${
+                        leafletSide === 'back'
+                          ? 'bg-amber-400 text-slate-950 shadow'
+                          : 'bg-[#102b1e] text-slate-300 hover:text-white border border-[#1f4d36]'
+                      }`}
+                    >
+                      📄 Page 2: Cards, Wilds & Actions
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between text-[11px] text-slate-400">
+                  <span>Currently viewing: <strong>{leafletSide === 'front' ? 'Front Side (Rules & Debt)' : 'Back Side (Cards & Actions)'}</strong></span>
+                  <a
+                    href={leafletSide === 'front' ? '/rules/rulebook-front.jpg' : '/rules/rulebook-back.jpg'}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="text-amber-300 hover:text-amber-200 underline font-bold flex items-center gap-1"
+                  >
+                    <span>🔍</span>
+                    <span>Open High-Res Full Size</span>
+                  </a>
+                </div>
+
+                {/* Leaflet Image Viewer */}
+                <div className="bg-black/50 p-2 rounded-2xl border border-[#1f4d36] flex justify-center overflow-hidden max-h-[600px] overflow-y-auto">
+                  <img
+                    src={leafletSide === 'front' ? '/rules/rulebook-front.jpg' : '/rules/rulebook-back.jpg'}
+                    alt="Official Monopoly Deal No Mercy Rules"
+                    className="w-full max-w-2xl rounded-xl shadow-2xl object-contain"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* TAB 1: CORE RULES */}
           {activeTab === 'rules' && (
             <div className="space-y-4">

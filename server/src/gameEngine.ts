@@ -587,24 +587,56 @@ export class GameEngine {
         }
 
         case ActionType.SUPER_SLY_DEAL: {
-          // Steal an entire complete set (including house/hotel)
-          if (!targetOpponent || !options?.targetColor) {
-            GameEngine.addLog(room, playerId, 'SUPER_SLY_DEAL_FAIL', `${player.displayName} played Super Sly Deal without a target set.`);
+          // Official No Mercy rule: Choose one color. Steal ALL properties, even complete sets,
+          // in that color from EACH player's collection (including matching Two-Color Wilds and Every-Color Wilds)!
+          const chosenColor = options?.targetColor;
+          if (!chosenColor) {
+            GameEngine.addLog(room, playerId, 'SUPER_SLY_DEAL_FAIL', `${player.displayName} played Super Sly Deal without a target color.`);
             break;
           }
-          const setIndex = targetOpponent.properties.findIndex(
-            (s) => s.color === options.targetColor && s.isComplete
+          let totalStolen = 0;
+          room.players.forEach((opp) => {
+            if (opp.id !== playerId) {
+              opp.properties.forEach((set) => {
+                const stolenFromSet: Card[] = [];
+                set.cards = set.cards.filter((c) => {
+                  const matches =
+                    c.color === chosenColor ||
+                    c.isRainbow ||
+                    (c.colors && c.colors.includes(chosenColor));
+                  if (matches) {
+                    stolenFromSet.push(c);
+                    return false;
+                  }
+                  return true;
+                });
+
+                if (stolenFromSet.length > 0) {
+                  totalStolen += stolenFromSet.length;
+                  let mySet = player.properties.find((s) => s.color === chosenColor);
+                  if (!mySet) {
+                    mySet = { color: chosenColor, cards: [], house: false, hotel: false, shack: false, isComplete: false };
+                    player.properties.push(mySet);
+                  }
+                  if (set.shack) {
+                    mySet.shack = true;
+                    set.shack = false;
+                  }
+                  mySet.cards.push(...stolenFromSet);
+                  mySet.isComplete = mySet.cards.length >= (PROPERTY_CONFIG[chosenColor]?.setSize || 3);
+                }
+                set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
+              });
+              opp.properties = opp.properties.filter((s) => s.cards.length > 0);
+            }
+          });
+
+          GameEngine.addLog(
+            room,
+            playerId,
+            'SUPER_SLY_DEAL_SUCCESS',
+            `👑 ${player.displayName} unleashed SUPER SLY DEAL on ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor}! Stole ALL ${totalStolen} properties across every opponent!`
           );
-          if (setIndex !== -1) {
-            const stolenSet = targetOpponent.properties.splice(setIndex, 1)[0];
-            player.properties.push(stolenSet);
-            GameEngine.addLog(
-              room,
-              playerId,
-              'SUPER_SLY_DEAL_SUCCESS',
-              `👑 ${player.displayName} used SUPER SLY DEAL to steal the entire complete ${PROPERTY_CONFIG[options.targetColor].name} set from ${targetOpponent.displayName}!`
-            );
-          }
           break;
         }
 
@@ -753,24 +785,25 @@ export class GameEngine {
         }
 
         case ActionType.TOUGH_LUCK: {
-          // Opponent discards all cards of chosen category
+          // Official No Mercy rule: Choose a player and steal all property, action, or money cards
+          // from their hand. Put the stolen cards directly into your hand!
           if (targetOpponent && options?.chosenCategory) {
             const cat = options.chosenCategory;
-            const discarded: Card[] = [];
+            const stolen: Card[] = [];
             targetOpponent.hand = targetOpponent.hand.filter((c) => {
               const match =
                 (cat === 'MONEY' && c.type === CardType.MONEY) ||
                 (cat === 'PROPERTY' && (c.type === CardType.PROPERTY || c.type === CardType.PROPERTY_WILDCARD)) ||
                 (cat === 'ACTION' && c.type === CardType.ACTION);
-              if (match) discarded.push(c);
+              if (match) stolen.push(c);
               return !match;
             });
-            room.gameState.discardPile.unshift(...discarded);
+            player.hand.push(...stolen);
             GameEngine.addLog(
               room,
               playerId,
-              'TOUGH_LUCK_HIT',
-              `☠️ Tough Luck! ${targetOpponent.displayName} was forced to discard ALL ${cat} cards (${discarded.length} cards) from their hand!`
+              'TOUGH_LUCK_STEAL',
+              `☠️ Tough Luck! ${player.displayName} stole ALL ${cat} cards (${stolen.length} cards) directly from ${targetOpponent.displayName}'s hand into their own hand!`
             );
           }
           break;
@@ -803,6 +836,7 @@ export class GameEngine {
             const set = player.properties.find((s) => s.color === targetColor);
             const count = set ? set.cards.length : 0;
             let rent = PROPERTY_CONFIG[targetColor]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[targetColor]?.rentValues?.length || 1) - 1)] || 1;
+            if (set?.shack) rent += 5;
             if (set?.house) rent += 3;
             if (set?.hotel) rent += 4;
 
@@ -835,12 +869,16 @@ export class GameEngine {
           break;
         }
 
+        case ActionType.SHACK:
         case ActionType.HOUSE:
         case ActionType.HOTEL: {
           const targetColor = options?.targetColor;
-          const set = player.properties.find((s) => s.color === targetColor && s.isComplete);
+          const set = player.properties.find((s) => s.color === targetColor);
           if (targetColor && set) {
-            if (card.actionType === ActionType.HOUSE) {
+            if (card.actionType === ActionType.SHACK || !set.isComplete) {
+              set.shack = true;
+              GameEngine.addLog(room, playerId, 'SHACK_ADDED', `🛖 ${player.displayName} placed a SHACK on their ${PROPERTY_CONFIG[targetColor].name} property (+ $5M rent)!`);
+            } else if (card.actionType === ActionType.HOUSE) {
               set.house = true;
               GameEngine.addLog(room, playerId, 'HOUSE_ADDED', `🏠 ${player.displayName} built a House on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $3M rent)!`);
             } else {
@@ -848,7 +886,7 @@ export class GameEngine {
               GameEngine.addLog(room, playerId, 'HOTEL_ADDED', `🏨 ${player.displayName} built a Hotel on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $4M rent)!`);
             }
           } else {
-            // Bank as cash if no complete set
+            // Bank as cash if no eligible property
             player.bank.push(card);
             GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
           }

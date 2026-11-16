@@ -24,6 +24,7 @@ export enum ActionType {
   GO_AGAIN         = 'GO_AGAIN',
   DOUBLE_THE_RENT  = 'DOUBLE_THE_RENT',
   RENT             = 'RENT',
+  SHACK            = 'SHACK',
   HOUSE            = 'HOUSE',
   HOTEL            = 'HOTEL',
   JUST_SAY_NO      = 'JUST_SAY_NO',
@@ -133,6 +134,9 @@ export interface PropertySet {
 
   /** Cards placed in the set (properties + wildcards). */
   cards: Card[];
+
+  /** Whether a Shack has been added to this set (No Mercy official rule). */
+  shack?: boolean;
 
   /** Whether a House has been added to this set. */
   house: boolean;

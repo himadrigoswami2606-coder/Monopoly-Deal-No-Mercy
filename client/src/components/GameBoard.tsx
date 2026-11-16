@@ -97,6 +97,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         ActionType.REPOSSESS,
         ActionType.TOUGH_LUCK,
         ActionType.RENT,
+        ActionType.SHACK,
         ActionType.HOUSE,
         ActionType.HOTEL,
       ].includes(card.actionType!);

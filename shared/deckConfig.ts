@@ -425,15 +425,15 @@ export function createDeck(): Card[] {
     );
   }
 
-  // House (x3, $3M) — +$3M rent to complete set
+  // Shack (x3, $3M) — Official No Mercy building card (+ $5M rent on any property or set!)
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
-        `action-house-${i}`,
-        'House',
-        ActionType.HOUSE,
+        `action-shack-${i}`,
+        'Shack',
+        ActionType.SHACK,
         3,
-        'Adds +$3M rent to any complete property set (except Railroads & Utilities).'
+        'Place on any property in your collection (single, incomplete, or complete) for +$5M rent!'
       )
     );
   }

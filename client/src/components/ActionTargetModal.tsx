@@ -50,7 +50,10 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
   const isYoink = card.actionType === ActionType.YOINK;
   const isRepossess = card.actionType === ActionType.REPOSSESS;
   const isToughLuck = card.actionType === ActionType.TOUGH_LUCK;
-  const isHouseOrHotel = card.actionType === ActionType.HOUSE || card.actionType === ActionType.HOTEL;
+  const isHouseOrHotel =
+    card.actionType === ActionType.HOUSE ||
+    card.actionType === ActionType.HOTEL ||
+    card.actionType === ActionType.SHACK;
   const isWildcard = card.type === 'PROPERTY_WILDCARD' as any;
   const isRent = card.actionType === ActionType.RENT;
 
@@ -304,36 +307,42 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
           </div>
         )}
 
-        {/* 6. House / Hotel: Target complete set */}
+        {/* 6. Shack / House / Hotel: Target property set */}
         {isHouseOrHotel && (
           <div className="mb-4">
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Attach to which Complete Set?
+              {card.actionType === ActionType.SHACK
+                ? 'Attach Shack to which Property (+$5M Rent)?'
+                : 'Attach to which Complete Set?'}
             </label>
-            {myPlayer.properties.filter((s) => s.isComplete).length === 0 ? (
+            {(card.actionType === ActionType.SHACK
+              ? myPlayer.properties
+              : myPlayer.properties.filter((s) => s.isComplete && s.color !== PropertyColor.RAILROAD && s.color !== PropertyColor.UTILITY)
+            ).length === 0 ? (
               <div className="text-xs text-rose-400 p-3 bg-rose-500/10 rounded-xl border border-rose-500/30">
-                You do not have a complete property set yet! You can bank this card as cash instead.
+                You do not have an eligible property set yet! You can bank this card as cash instead.
               </div>
             ) : (
               <div className="grid grid-cols-2 gap-2">
-                {myPlayer.properties
-                  .filter((s) => s.isComplete && s.color !== PropertyColor.RAILROAD && s.color !== PropertyColor.UTILITY)
-                  .map((set) => (
-                    <button
-                      key={set.color}
-                      type="button"
-                      onClick={() => setSelectedColor(set.color)}
-                      className={`p-2.5 rounded-xl border text-left transition-all ${
-                        selectedColor === set.color
-                          ? 'bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/40'
-                          : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
-                      }`}
-                    >
-                      <span className="font-bold text-xs uppercase" style={{ color: PROPERTY_CONFIG[set.color]?.hexColor }}>
-                        {PROPERTY_CONFIG[set.color]?.name} Set
-                      </span>
-                    </button>
-                  ))}
+                {(card.actionType === ActionType.SHACK
+                  ? myPlayer.properties
+                  : myPlayer.properties.filter((s) => s.isComplete && s.color !== PropertyColor.RAILROAD && s.color !== PropertyColor.UTILITY)
+                ).map((set) => (
+                  <button
+                    key={set.color}
+                    type="button"
+                    onClick={() => setSelectedColor(set.color)}
+                    className={`p-2.5 rounded-xl border text-left transition-all ${
+                      selectedColor === set.color
+                        ? 'bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/40'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <span className="font-bold text-xs uppercase" style={{ color: PROPERTY_CONFIG[set.color]?.hexColor }}>
+                      {PROPERTY_CONFIG[set.color]?.name} ({set.cards.length} cards)
+                    </span>
+                  </button>
+                ))}
               </div>
             )}
           </div>
