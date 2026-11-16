@@ -28,6 +28,7 @@ export const ActionReactionModal: React.FC<ActionReactionModalProps> = ({
   onAcceptAction,
 }) => {
   const [selectedCardIds, setSelectedCardIds] = useState<Set<string>>(new Set());
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Available assets
   const bankCards = myPlayer.bank;
@@ -55,6 +56,7 @@ export const ActionReactionModal: React.FC<ActionReactionModalProps> = ({
     (isInsolvent && selectedCardIds.size === totalAssets.length);
 
   const handleConfirmPayment = () => {
+    setIsSubmitting(true);
     onPayCards(Array.from(selectedCardIds), isInsolvent);
   };
 
@@ -199,10 +201,14 @@ export const ActionReactionModal: React.FC<ActionReactionModalProps> = ({
               <button
                 type="button"
                 onClick={handleConfirmPayment}
-                disabled={!canPay}
-                className="py-3 px-4 rounded-xl font-heading font-bold text-xs uppercase tracking-wider transition-all shadow bg-slate-800 hover:bg-slate-700 text-slate-200 disabled:opacity-40 disabled:pointer-events-none border border-slate-700"
+                disabled={!canPay || isSubmitting}
+                className="py-3 px-4 rounded-xl font-heading font-black text-xs uppercase tracking-wider transition-all shadow bg-amber-500 hover:bg-amber-400 text-slate-950 disabled:opacity-40 disabled:pointer-events-none border border-amber-300 active:scale-95 flex items-center justify-center gap-1.5"
               >
-                Pay (${totalSelectedValue}M / ${amountDue}M)
+                {isSubmitting ? (
+                  <span>Submitting Payment...</span>
+                ) : (
+                  <span>Pay (${totalSelectedValue}M / ${amountDue}M)</span>
+                )}
               </button>
 
               <button

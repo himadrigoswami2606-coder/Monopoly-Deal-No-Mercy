@@ -22,6 +22,8 @@ import {
 } from '../../../shared/types';
 import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
+import { HandCardSlider } from './HandCardSlider';
+import { ActionNotificationWindow } from './ActionNotificationWindow';
 import { ActionTargetModal } from './ActionTargetModal';
 import { ActionReactionModal } from './ActionReactionModal';
 import { WildcardSelectModal } from './WildcardSelectModal';
@@ -79,6 +81,42 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [showHandLimitModal, setShowHandLimitModal] = useState(false);
   const [flipRainbowCard, setFlipRainbowCard] = useState<Card | null>(null);
 
+  // Background Music state & toggle
+  const [isMusicPlaying, setIsMusicPlaying] = useState(false);
+  const toggleMusic = () => {
+    const next = sounds.toggleBgm();
+    setIsMusicPlaying(next);
+  };
+
+  // Sound cues on live game events
+  const prevTurnPlayerRef = React.useRef(gameState.activePlayerId);
+  const prevPendingActionIdRef = React.useRef(gameState.pendingAction?.id);
+
+  React.useEffect(() => {
+    // When turn changes to ME
+    if (gameState.activePlayerId === myPlayer.id && prevTurnPlayerRef.current !== myPlayer.id) {
+      sounds.playTurnNotification();
+    }
+    prevTurnPlayerRef.current = gameState.activePlayerId;
+  }, [gameState.activePlayerId, myPlayer.id]);
+
+  React.useEffect(() => {
+    // When a new pending demand targets ME
+    const currentPending = gameState.pendingAction;
+    if (
+      currentPending &&
+      currentPending.id !== prevPendingActionIdRef.current &&
+      currentPending.currentAwaitingPlayerId === myPlayer.id
+    ) {
+      if (currentPending.status === 'AWAITING_PAYMENT') {
+        sounds.playRentDemanded();
+      } else if (currentPending.status === 'AWAITING_JSN') {
+        sounds.playActionAttack();
+      }
+    }
+    prevPendingActionIdRef.current = currentPending?.id;
+  }, [gameState.pendingAction?.id, gameState.pendingAction?.currentAwaitingPlayerId, myPlayer.id]);
+
   // Initiating card play
   const handleInitiatePlay = (card: Card) => {
     if (!isMyTurn || pendingSettlement || gameState.pendingAction) return;
@@ -111,8 +149,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     if (needsTargetModal) {
       setTargetingCard(card);
     } else {
-      // Direct plays (Properties, Pass Go, Money, etc.)
-      sounds.playCardSnap();
+      // Direct plays with situational sounds
+      if (card.type === CardType.PROPERTY) {
+        sounds.playPropertyPlacement();
+      } else if (card.type === CardType.MONEY) {
+        sounds.playBankCoin();
+      } else {
+        sounds.playCardSnap();
+      }
       socket?.emit(EVENT_PLAY_CARD, { cardId: card.id });
     }
   };
@@ -267,6 +311,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           >
             <span className="text-sm">❓</span>
             <span className="hidden sm:inline">Rules & Cards</span>
+          </button>
+
+          {/* Background Lounge Music Toggle */}
+          <button
+            onClick={toggleMusic}
+            className={`p-1 px-2.5 rounded-lg border text-xs font-semibold flex items-center gap-1.5 shadow transition-all ${
+              isMusicPlaying
+                ? 'bg-amber-500/20 border-amber-400 text-amber-300 ring-1 ring-amber-400/40'
+                : 'bg-[#133324] border-[#1f4d36] hover:border-slate-500 text-slate-300'
+            }`}
+            title="Toggle Monopoly Lounge Background Music"
+          >
+            <span>{isMusicPlaying ? '🎵 Music: ON' : '🔈 Music: OFF'}</span>
           </button>
 
           {/* Action Log Drawer Toggle */}
@@ -466,6 +523,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             </div>
           </div>
         </div>
+
+        {/* ── TRANSLUCENT CENTRAL ACTION WINDOW (Who asked what from whom) ── */}
+        <ActionNotificationWindow
+          gameState={gameState}
+          players={players}
+          myPlayer={myPlayer}
+        />
 
         {/* ─────────────────────────────────────────────────────────────────── */}
         {/* 3. ACTIVE PLAYER BOARD CONSOLE (Screenshot 3)                      */}
@@ -691,31 +755,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               </div>
             </div>
 
-            {/* Right Area: Authentic Fanned Hand (Screenshot 3) */}
-            <div className="lg:col-span-7 flex flex-col items-center lg:items-end">
-              <div className="w-full flex items-center justify-center lg:justify-end overflow-x-auto pt-6 pb-2 px-6">
-                <div className="flex items-center">
-                  {myHand.map((card) => (
-                    <div
-                      key={card.id}
-                      className="card-fan-item flex-shrink-0"
-                    >
-                      <CardView
-                        card={card}
-                        size="md"
-                        isPlayable={isMyTurn}
-                        onPlay={() => handleInitiatePlay(card)}
-                        onBank={() => handleBankCard(card)}
-                      />
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Subtitle Caption under Hand (Screenshot 3) */}
-              <div className="text-[10px] font-mono font-bold tracking-widest text-slate-400 mt-1 uppercase">
-                HOVER TO PEEK • CLICK TO PLAY
-              </div>
+            {/* Right Area: Interactive Hand Card Slider */}
+            <div className="lg:col-span-7 flex flex-col items-center w-full min-w-0">
+              <HandCardSlider
+                cards={myHand}
+                isMyTurn={isMyTurn}
+                onPlayCard={handleInitiatePlay}
+                onBankCard={handleBankCard}
+              />
             </div>
           </div>
         </div>
@@ -764,17 +811,31 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onPayCards={(selectedCardIds, surrenderDebtChip) => {
                 sounds.playBankCoin();
                 socket?.emit(EVENT_SUBMIT_PAYMENT, {
+                  actionId: gameState.pendingAction?.id,
+                  selectedCardIds,
                   cardIds: selectedCardIds,
                   surrenderDebtChip,
                 });
               }}
               onJustSayNo={() => {
                 sounds.playJustSayNo();
-                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, { playJustSayNo: true });
+                const jsnCard = myHand.find(
+                  (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+                );
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, {
+                  actionId: gameState.pendingAction?.id,
+                  accept: false,
+                  playJustSayNo: true,
+                  justSayNoCardId: jsnCard?.id,
+                });
               }}
               onAcceptAction={() => {
                 sounds.playCardSnap();
-                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, { playJustSayNo: false });
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, {
+                  actionId: gameState.pendingAction?.id,
+                  accept: true,
+                  playJustSayNo: false,
+                });
               }}
             />
           )}
@@ -787,11 +848,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               hasJustSayNo={hasJustSayNo}
               onJustSayNo={() => {
                 sounds.playJustSayNo();
-                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, { playJustSayNo: true });
+                const jsnCard = myHand.find(
+                  (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+                );
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, {
+                  actionId: gameState.pendingAction?.id,
+                  accept: false,
+                  playJustSayNo: true,
+                  justSayNoCardId: jsnCard?.id,
+                });
               }}
               onConfirmRepossess={(keepCardId, distributions) => {
                 sounds.playActionAttack();
                 socket?.emit(EVENT_SUBMIT_REPOSSESS, {
+                  actionId: gameState.pendingAction?.id,
                   keepCardId,
                   distributions,
                 });

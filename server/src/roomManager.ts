@@ -825,7 +825,12 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   // -------------------------------------------------------------------------
   socket.on(
     EVENT_RESPOND_JUST_SAY_NO,
-    (data: { actionId: string; accept: boolean; justSayNoCardId?: string }) => {
+    (data: {
+      actionId?: string;
+      accept?: boolean;
+      playJustSayNo?: boolean;
+      justSayNoCardId?: string;
+    }) => {
       const roomCode = socketToRoomCode.get(socket.id);
       const playerId = socketToPlayerId.get(socket.id);
       if (!roomCode || !playerId) return;
@@ -833,12 +838,16 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       const room = rooms.get(roomCode);
       if (!room || !room.gameState) return;
 
+      const actionId = data?.actionId || room.gameState.pendingAction?.id;
+      if (!actionId) return;
+
+      const accept = data?.accept !== undefined ? data.accept : !data?.playJustSayNo;
       const result = GameEngine.respondJustSayNo(
         room,
         playerId,
-        data.actionId,
-        data.accept,
-        data.justSayNoCardId
+        actionId,
+        accept,
+        data?.justSayNoCardId
       );
       if (!result.success) {
         socket.emit(EVENT_ERROR, { message: result.error || 'Cannot respond to action' });
@@ -854,7 +863,12 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   // -------------------------------------------------------------------------
   socket.on(
     EVENT_SUBMIT_PAYMENT,
-    (data: { actionId: string; selectedCardIds: string[]; surrenderDebtChip?: boolean }) => {
+    (data: {
+      actionId?: string;
+      selectedCardIds?: string[];
+      cardIds?: string[];
+      surrenderDebtChip?: boolean;
+    }) => {
       const roomCode = socketToRoomCode.get(socket.id);
       const playerId = socketToPlayerId.get(socket.id);
       if (!roomCode || !playerId) return;
@@ -862,12 +876,19 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       const room = rooms.get(roomCode);
       if (!room || !room.gameState) return;
 
+      const actionId = data?.actionId || room.gameState.pendingAction?.id;
+      if (!actionId) {
+        socket.emit(EVENT_ERROR, { message: 'No active payment demand found' });
+        return;
+      }
+
+      const cardIds = data?.selectedCardIds || data?.cardIds || [];
       const result = GameEngine.submitPayment(
         room,
         playerId,
-        data.actionId,
-        data.selectedCardIds,
-        data.surrenderDebtChip
+        actionId,
+        cardIds,
+        data?.surrenderDebtChip
       );
       if (!result.success) {
         socket.emit(EVENT_ERROR, { message: result.error || 'Cannot submit payment' });
@@ -884,9 +905,9 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   socket.on(
     EVENT_SUBMIT_REPOSSESS,
     (data: {
-      actionId: string;
-      keepCardId: string;
-      distributions: { cardId: string; targetPlayerId: string }[];
+      actionId?: string;
+      keepCardId?: string;
+      distributions?: { cardId: string; targetPlayerId: string }[];
     }) => {
       const roomCode = socketToRoomCode.get(socket.id);
       const playerId = socketToPlayerId.get(socket.id);
@@ -895,12 +916,18 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       const room = rooms.get(roomCode);
       if (!room || !room.gameState) return;
 
+      const actionId = data?.actionId || room.gameState.pendingAction?.id;
+      if (!actionId || !data?.keepCardId) {
+        socket.emit(EVENT_ERROR, { message: 'No active repossession found' });
+        return;
+      }
+
       const result = GameEngine.submitRepossess(
         room,
         playerId,
-        data.actionId,
+        actionId,
         data.keepCardId,
-        data.distributions
+        data.distributions || []
       );
       if (!result.success) {
         socket.emit(EVENT_ERROR, { message: result.error || 'Cannot submit repossession' });
