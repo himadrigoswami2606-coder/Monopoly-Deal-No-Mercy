@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    background-color: #121622;
+    color: #f1f5f9;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    overflow-x: hidden;
+  }
+}
+
+/* Custom tabletop felt / textured effect */
+.tabletop-bg {
+  background-color: #121622;
+  background-image: 
+    radial-gradient(circle at 50% 20%, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.95) 70%),
+    radial-gradient(rgba(245, 166, 35, 0.03) 1px, transparent 0);
+  background-size: 100% 100%, 24px 24px;
+}
+
+/* Card hover glow */
+.card-glow:hover {
+  box-shadow: 0 10px 25px -5px rgba(245, 166, 35, 0.25), 0 8px 10px -6px rgba(245, 166, 35, 0.2);
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}

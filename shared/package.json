@@ -1,0 +1,7 @@
+{
+  "name": "@monopoly/shared",
+  "version": "1.0.0",
+  "private": true,
+  "main": "deckConfig.ts",
+  "types": "types.ts"
+}
