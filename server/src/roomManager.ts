@@ -33,6 +33,9 @@ import {
   EVENT_FLIP_WILDCARD,
   EVENT_SETTLE_DEBT,
   EVENT_RESOLVE_DEBT_DRAW,
+  EVENT_RESPOND_JUST_SAY_NO,
+  EVENT_SUBMIT_PAYMENT,
+  EVENT_SUBMIT_REPOSSESS,
   PropertyColor,
 } from '../../shared/types';
 import { GameEngine } from './gameEngine';
@@ -88,10 +91,81 @@ function broadcastGameState(io: SocketIOServer, room: Room): void {
         breakdown: room.gameState.winBreakdown,
       });
     }
+  } else if (room.gameState.pendingAction) {
+    // If pending action awaits a Bot, trigger AI reaction automatically
+    triggerBotReactionIfPending(io, room);
   } else {
     // If next player is a Bot, trigger AI automated turn
     triggerBotTurnIfActive(io, room);
   }
+}
+
+/**
+ * Automatically resolves reactions for AI Bot players (Just Say No, Payment, Repossess).
+ */
+function triggerBotReactionIfPending(io: SocketIOServer, room: Room): void {
+  if (!room.gameState?.pendingAction) return;
+  const pending = room.gameState.pendingAction;
+  const bot = room.players.find((p) => p.id === pending.currentAwaitingPlayerId && p.isBot);
+  if (!bot) return;
+
+  setTimeout(() => {
+    if (!room.gameState?.pendingAction || room.gameState.pendingAction.id !== pending.id) return;
+    if (room.gameState.pendingAction.currentAwaitingPlayerId !== bot.id) return;
+
+    if (pending.status === 'AWAITING_JSN') {
+      const hasJSN = bot.hand.some(
+        (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+      );
+      if (hasJSN) {
+        GameEngine.respondJustSayNo(room, bot.id, pending.id, false);
+      } else {
+        GameEngine.respondJustSayNo(room, bot.id, pending.id, true);
+      }
+      broadcastGameState(io, room);
+    } else if (pending.status === 'AWAITING_PAYMENT') {
+      const amountDue = pending.rentAmount || 1;
+      const selectedIds: string[] = [];
+      let paid = 0;
+
+      // 1. Pay with cash from bank
+      for (const card of bot.bank) {
+        if (paid >= amountDue) break;
+        selectedIds.push(card.id);
+        paid += card.cashValue;
+      }
+
+      // 2. Pay with properties if bank was not enough
+      if (paid < amountDue) {
+        for (const set of bot.properties) {
+          if (paid >= amountDue) break;
+          if (!set.isComplete) {
+            for (const card of set.cards) {
+              if (paid >= amountDue) break;
+              selectedIds.push(card.id);
+              paid += card.cashValue;
+            }
+          }
+        }
+      }
+
+      // 3. Surrender debt chip if insolvent
+      const surrenderDebtChip = paid < amountDue && bot.debtChips.length > 0;
+      GameEngine.submitPayment(room, bot.id, pending.id, selectedIds, surrenderDebtChip);
+      broadcastGameState(io, room);
+    } else if (pending.status === 'AWAITING_REPOSSESS') {
+      const allCards = bot.properties.flatMap((s) => s.cards);
+      allCards.sort((a, b) => b.cashValue - a.cashValue);
+      const keepCard = allCards[0];
+      const otherCards = allCards.slice(1);
+      const distributions = otherCards.map((c) => ({
+        cardId: c.id,
+        targetPlayerId: pending.attackerId,
+      }));
+      GameEngine.submitRepossess(room, bot.id, pending.id, keepCard?.id || '', distributions);
+      broadcastGameState(io, room);
+    }
+  }, 750);
 }
 
 /**
@@ -220,16 +294,18 @@ function chooseBotCardPlay(room: Room, bot: Player): {
     }
   }
 
-  // 6. Debt Collector: Demand $5M from opponent
-  const debtCard = hand.find(
-    (c) => c.type === CardType.ACTION && c.actionType === ActionType.DEBT_COLLECTOR
+  // 6. Forced Debt: Steal 1 Debt Chip from opponent (Point 10)
+  const forcedDebtCard = hand.find(
+    (c) =>
+      c.type === CardType.ACTION &&
+      c.actionType === ActionType.FORCED_DEBT
   );
-  if (debtCard) {
-    const oppWithFunds = opponents.find((o) => o.bank.length > 0) || opponents[0];
-    if (oppWithFunds) {
+  if (forcedDebtCard) {
+    const oppWithChips = opponents.find((o) => o.debtChips.length > 0) || opponents[0];
+    if (oppWithChips) {
       return {
-        cardId: debtCard.id,
-        options: { targetPlayerId: oppWithFunds.id },
+        cardId: forcedDebtCard.id,
+        options: { targetPlayerId: oppWithChips.id },
       };
     }
   }
@@ -355,6 +431,11 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
     function executeNextPlay() {
       if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer!.id) return;
 
+      if (room.gameState.pendingAction) {
+        setTimeout(executeNextPlay, 800);
+        return;
+      }
+
       if (
         room.gameState.playsUsedThisTurn < room.gameState.maxPlaysPerTurn &&
         activePlayer!.hand.length > 0 &&
@@ -375,7 +456,12 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
 
       // End Bot turn after plays are complete
       setTimeout(() => {
-        if (room.gameState && !room.gameState.isGameOver && room.gameState.activePlayerId === activePlayer!.id) {
+        if (
+          room.gameState &&
+          !room.gameState.isGameOver &&
+          room.gameState.activePlayerId === activePlayer!.id &&
+          !room.gameState.pendingAction
+        ) {
           GameEngine.endTurn(room, activePlayer!.id);
           broadcastGameState(io, room);
         }
@@ -675,7 +761,7 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   );
 
   // -------------------------------------------------------------------------
-  // 8. FLIP WILDCARD BETWEEN ELIGIBLE PROPERTY SETS (Free Action)
+  // 8. FLIP WILDCARD BETWEEN ELIGIBLE PROPERTY SETS (Costs 1 Play - Point 5 & 9)
   // -------------------------------------------------------------------------
   socket.on(EVENT_FLIP_WILDCARD, (data: { cardId: string; toColor: PropertyColor }) => {
     const roomCode = socketToRoomCode.get(socket.id);
@@ -685,34 +771,13 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     const room = rooms.get(roomCode);
     if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
 
-    const player = room.players.find((p) => p.id === playerId);
-    if (!player) return;
-
-    // Find wildcard card across property sets
-    let foundCard: any = null;
-    for (const set of player.properties) {
-      const cIdx = set.cards.findIndex((c) => c.id === data.cardId);
-      if (cIdx !== -1) {
-        foundCard = set.cards.splice(cIdx, 1)[0];
-        set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
-        if (set.cards.length === 0) {
-          player.properties = player.properties.filter((s) => s !== set);
-        }
-        break;
-      }
+    const result = GameEngine.flipWildcard(room, playerId, data.cardId, data.toColor);
+    if (!result.success) {
+      socket.emit(EVENT_ERROR, { message: result.error || 'Cannot flip wildcard' });
+      return;
     }
 
-    if (foundCard) {
-      let targetSet = player.properties.find((s) => s.color === data.toColor);
-      if (!targetSet) {
-        targetSet = { color: data.toColor, cards: [], house: false, hotel: false, isComplete: false };
-        player.properties.push(targetSet);
-      }
-      targetSet.cards.push(foundCard);
-      targetSet.isComplete = targetSet.cards.length >= (PROPERTY_CONFIG[data.toColor]?.setSize || 3);
-
-      broadcastGameState(io, room);
-    }
+    broadcastGameState(io, room);
   });
 
   // -------------------------------------------------------------------------
@@ -756,9 +821,100 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   });
 
   // -------------------------------------------------------------------------
-  // 9. END TURN & DRAW CARDS
+  // 8D. JUST SAY NO RESPONSE (Point 1)
   // -------------------------------------------------------------------------
-  socket.on(EVENT_END_TURN, () => {
+  socket.on(
+    EVENT_RESPOND_JUST_SAY_NO,
+    (data: { actionId: string; accept: boolean; justSayNoCardId?: string }) => {
+      const roomCode = socketToRoomCode.get(socket.id);
+      const playerId = socketToPlayerId.get(socket.id);
+      if (!roomCode || !playerId) return;
+
+      const room = rooms.get(roomCode);
+      if (!room || !room.gameState) return;
+
+      const result = GameEngine.respondJustSayNo(
+        room,
+        playerId,
+        data.actionId,
+        data.accept,
+        data.justSayNoCardId
+      );
+      if (!result.success) {
+        socket.emit(EVENT_ERROR, { message: result.error || 'Cannot respond to action' });
+        return;
+      }
+
+      broadcastGameState(io, room);
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // 8E. SUBMIT PAYMENT (Point 6 & 10)
+  // -------------------------------------------------------------------------
+  socket.on(
+    EVENT_SUBMIT_PAYMENT,
+    (data: { actionId: string; selectedCardIds: string[]; surrenderDebtChip?: boolean }) => {
+      const roomCode = socketToRoomCode.get(socket.id);
+      const playerId = socketToPlayerId.get(socket.id);
+      if (!roomCode || !playerId) return;
+
+      const room = rooms.get(roomCode);
+      if (!room || !room.gameState) return;
+
+      const result = GameEngine.submitPayment(
+        room,
+        playerId,
+        data.actionId,
+        data.selectedCardIds,
+        data.surrenderDebtChip
+      );
+      if (!result.success) {
+        socket.emit(EVENT_ERROR, { message: result.error || 'Cannot submit payment' });
+        return;
+      }
+
+      broadcastGameState(io, room);
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // 8F. SUBMIT REPOSSESSION (Point 7)
+  // -------------------------------------------------------------------------
+  socket.on(
+    EVENT_SUBMIT_REPOSSESS,
+    (data: {
+      actionId: string;
+      keepCardId: string;
+      distributions: { cardId: string; targetPlayerId: string }[];
+    }) => {
+      const roomCode = socketToRoomCode.get(socket.id);
+      const playerId = socketToPlayerId.get(socket.id);
+      if (!roomCode || !playerId) return;
+
+      const room = rooms.get(roomCode);
+      if (!room || !room.gameState) return;
+
+      const result = GameEngine.submitRepossess(
+        room,
+        playerId,
+        data.actionId,
+        data.keepCardId,
+        data.distributions
+      );
+      if (!result.success) {
+        socket.emit(EVENT_ERROR, { message: result.error || 'Cannot submit repossession' });
+        return;
+      }
+
+      broadcastGameState(io, room);
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // 9. END TURN (Point 2: choice of discard if hand > 7)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_END_TURN, (data?: { discardCardIds?: string[] }) => {
     const roomCode = socketToRoomCode.get(socket.id);
     const playerId = socketToPlayerId.get(socket.id);
     if (!roomCode || !playerId) return;
@@ -766,7 +922,7 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     const room = rooms.get(roomCode);
     if (!room || !room.gameState) return;
 
-    const result = GameEngine.endTurn(room, playerId);
+    const result = GameEngine.endTurn(room, playerId, data?.discardCardIds);
     if (!result.success) {
       socket.emit(EVENT_ERROR, { message: result.error || 'Cannot end turn' });
       return;
@@ -775,16 +931,13 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     broadcastGameState(io, room);
   });
 
+  // -------------------------------------------------------------------------
+  // 9B. DRAW CARDS (Point 3: Manual deck clicking disabled)
+  // -------------------------------------------------------------------------
   socket.on(EVENT_DRAW_CARDS, () => {
-    const roomCode = socketToRoomCode.get(socket.id);
-    const playerId = socketToPlayerId.get(socket.id);
-    if (!roomCode || !playerId) return;
-
-    const room = rooms.get(roomCode);
-    if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
-
-    GameEngine.drawCards(room, playerId, 2);
-    broadcastGameState(io, room);
+    socket.emit(EVENT_ERROR, {
+      message: 'Manual deck draw is disabled. Cards are dealt automatically at the start of your turn.',
+    });
   });
 
   // -------------------------------------------------------------------------

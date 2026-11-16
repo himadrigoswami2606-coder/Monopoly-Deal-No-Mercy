@@ -46,7 +46,8 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
   const isSlyDeal = card.actionType === ActionType.SLY_DEAL;
   const isSuperSlyDeal = card.actionType === ActionType.SUPER_SLY_DEAL;
   const isForcedDeal = card.actionType === ActionType.FORCED_DEAL;
-  const isDebtCollector = card.actionType === ActionType.DEBT_COLLECTOR;
+  const isForcedDebt = card.actionType === ActionType.FORCED_DEBT;
+  const isDebtCollector = isForcedDebt;
   const isYoink = card.actionType === ActionType.YOINK;
   const isRepossess = card.actionType === ActionType.REPOSSESS;
   const isToughLuck = card.actionType === ActionType.TOUGH_LUCK;
@@ -56,6 +57,12 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
     card.actionType === ActionType.SHACK;
   const isWildcard = card.type === 'PROPERTY_WILDCARD' as any;
   const isRent = card.actionType === ActionType.RENT;
+
+  // For Rainbow Wildcard (Point 9): only colors player already owns in property sets
+  const ownedColors = Array.from(new Set(myPlayer.properties.map((s) => s.color)));
+  const availableWildColors = card.isRainbow
+    ? ownedColors
+    : (card.colors || (Object.keys(PROPERTY_CONFIG) as PropertyColor[]));
 
   // Incomplete property sets of opponent (for Sly Deal & Forced Deal)
   const incompleteOpponentSets = selectedOpponent?.properties.filter((s) => !s.isComplete) || [];
@@ -284,26 +291,32 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
               Select Color Set to Place In:
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-              {(card.colors || Object.keys(PROPERTY_CONFIG) as PropertyColor[]).map((c) => (
-                <button
-                  key={c}
-                  type="button"
-                  onClick={() => setSelectedColor(c)}
-                  className={`py-2 px-3 rounded-xl border text-xs font-bold uppercase transition-all ${
-                    selectedColor === c
-                      ? 'ring-2 ring-amber-400 border-transparent shadow'
-                      : 'border-slate-800 opacity-80 hover:opacity-100'
-                  }`}
-                  style={{
-                    backgroundColor: PROPERTY_CONFIG[c]?.hexColor,
-                    color: PROPERTY_CONFIG[c]?.textColor,
-                  }}
-                >
-                  {PROPERTY_CONFIG[c]?.name}
-                </button>
-              ))}
-            </div>
+            {card.isRainbow && availableWildColors.length === 0 ? (
+              <div className="text-xs text-rose-400 p-3 bg-rose-500/10 rounded-xl border border-rose-500/30">
+                You must already own at least one property to add a Rainbow Wildcard! You can bank this card as cash instead.
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                {availableWildColors.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    onClick={() => setSelectedColor(c)}
+                    className={`py-2 px-3 rounded-xl border text-xs font-bold uppercase transition-all ${
+                      selectedColor === c
+                        ? 'ring-2 ring-amber-400 border-transparent shadow'
+                        : 'border-slate-800 opacity-80 hover:opacity-100'
+                    }`}
+                    style={{
+                      backgroundColor: PROPERTY_CONFIG[c]?.hexColor,
+                      color: PROPERTY_CONFIG[c]?.textColor,
+                    }}
+                  >
+                    {PROPERTY_CONFIG[c]?.name}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -312,7 +325,7 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
           <div className="mb-4">
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
               {card.actionType === ActionType.SHACK
-                ? 'Attach Shack to which Property (+$5M Rent)?'
+                ? 'Attach Shack to which Property (+ $3M Rent)?'
                 : 'Attach to which Complete Set?'}
             </label>
             {(card.actionType === ActionType.SHACK
@@ -376,7 +389,7 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
                         {PROPERTY_CONFIG[c]?.name} ({count} cards)
                       </div>
                       <div className="text-[10px] text-emerald-400 font-mono mt-0.5 font-bold">
-                        Rent: ${rent}M {set?.house ? '+ $3M House' : ''} {set?.hotel ? '+ $4M Hotel' : ''}
+                        Rent: ${rent}M {set?.shack ? '+ $3M Shack' : ''} {set?.house ? '+ $3M House' : ''} {set?.hotel ? '+ $4M Hotel' : ''}
                       </div>
                     </button>
                   );

@@ -425,7 +425,7 @@ export function createDeck(): Card[] {
     );
   }
 
-  // Shack (x3, $3M) — Official No Mercy building card (+ $5M rent on any property or set!)
+  // Shack (x3, $3M) — Official No Mercy building card (+ $3M rent on any property or set!)
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
@@ -433,7 +433,7 @@ export function createDeck(): Card[] {
         'Shack',
         ActionType.SHACK,
         3,
-        'Place on any property in your collection (single, incomplete, or complete) for +$5M rent!'
+        'Place on any property in your collection (single, incomplete, or complete) for +$3M rent!'
       )
     );
   }
@@ -503,15 +503,15 @@ export function createDeck(): Card[] {
     );
   }
 
-  // Debt Collector (x3, $3M) — Force 1 player to pay you $5M
+  // Forced Debt (x3, $3M) — Official No Mercy card: Choose 1 player and take 1 Debt Chip!
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
-        `action-debtcollector-${i}`,
-        'Debt Collector',
-        ActionType.DEBT_COLLECTOR,
+        `action-forceddebt-${i}`,
+        'Forced Debt',
+        ActionType.FORCED_DEBT,
         3,
-        'Force 1 player to pay you $5M in cash or properties.'
+        'Choose 1 player and immediately take 1 of their Debt Chips!'
       )
     );
   }

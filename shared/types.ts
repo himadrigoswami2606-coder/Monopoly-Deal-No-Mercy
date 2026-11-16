@@ -31,7 +31,8 @@ export enum ActionType {
   SUPER_SLY_DEAL   = 'SUPER_SLY_DEAL',
   SLY_DEAL         = 'SLY_DEAL',
   FORCED_DEAL      = 'FORCED_DEAL',
-  DEBT_COLLECTOR   = 'DEBT_COLLECTOR',
+  FORCED_DEBT      = 'FORCED_DEBT',
+  DEBT_COLLECTOR   = 'FORCED_DEBT', // backward compatible alias
   ITS_MY_BIRTHDAY  = 'ITS_MY_BIRTHDAY',
   YOINK            = 'YOINK',
   REPOSSESS        = 'REPOSSESS',
@@ -249,6 +250,28 @@ export interface PendingDebtSettlement {
   creditorIds: string[]; // prioritized by acquiredAt
 }
 
+export type PendingActionStatus = 'AWAITING_JSN' | 'AWAITING_PAYMENT' | 'AWAITING_REPOSSESS';
+
+/** Targeted action requiring real-time response from opponent(s) */
+export interface PendingAction {
+  id: string;
+  attackerId: string;
+  attackerName: string;
+  card: Card;
+  actionType: ActionType;
+  targetPlayerId?: string; // primary target
+  targetPlayerIds?: string[]; // for multi-player demands (Dual Rent / Birthday)
+  currentAwaitingPlayerId: string;
+  options?: any;
+  rentAmount?: number;
+  rentColor?: PropertyColor;
+  amountDue?: number;
+  demandDescription?: string;
+  justSayNoChain: { playerId: string; playerName: string; cardId: string }[];
+  status: PendingActionStatus;
+  createdAt: number;
+}
+
 /** The authoritative state of an in-progress game. */
 export interface GameState {
   /** ID of the player whose turn it currently is. */
@@ -283,6 +306,9 @@ export interface GameState {
 
   /** Staged drawn cards for debt settlement at turn start (Point 5). */
   pendingDebtSettlement?: PendingDebtSettlement | null;
+
+  /** Real-time reaction action (Just Say No, Rent payment, Repossess). */
+  pendingAction?: PendingAction | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,6 +362,9 @@ export const EVENT_REMOVE_BOT       = 'remove-bot'       as const;
 export const EVENT_FLIP_WILDCARD    = 'flip-wildcard'    as const;
 export const EVENT_SETTLE_DEBT      = 'settle-debt'      as const;
 export const EVENT_RESOLVE_DEBT_DRAW= 'resolve-debt-draw'as const;
+export const EVENT_RESPOND_JUST_SAY_NO = 'respond-just-say-no' as const;
+export const EVENT_SUBMIT_PAYMENT   = 'submit-payment'   as const;
+export const EVENT_SUBMIT_REPOSSESS = 'submit-repossess' as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
 export const EVENT_ROOM_JOINED      = 'room-joined'      as const;
@@ -362,7 +391,7 @@ export interface ClientToServerEvents {
     chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
     asBank?: boolean;
   }) => void;
-  [EVENT_END_TURN]: () => void;
+  [EVENT_END_TURN]: (data?: { discardCardIds?: string[] }) => void;
   [EVENT_DRAW_CARDS]: () => void;
   [EVENT_LEAVE_ROOM]: () => void;
   [EVENT_SEND_EMOTE]: (data: { emote: string }) => void;
@@ -371,6 +400,9 @@ export interface ClientToServerEvents {
   [EVENT_FLIP_WILDCARD]: (data: { cardId: string; toColor: PropertyColor }) => void;
   [EVENT_SETTLE_DEBT]: (data: { cardId: string; creditorId: string }) => void;
   [EVENT_RESOLVE_DEBT_DRAW]: (data: { chosenCardId: string }) => void;
+  [EVENT_RESPOND_JUST_SAY_NO]: (data: { actionId: string; accept: boolean; justSayNoCardId?: string }) => void;
+  [EVENT_SUBMIT_PAYMENT]: (data: { actionId: string; selectedCardIds: string[]; surrenderDebtChip?: boolean }) => void;
+  [EVENT_SUBMIT_REPOSSESS]: (data: { actionId: string; keepCardId: string; distributions: { cardId: string; targetPlayerId: string }[] }) => void;
 }
 
 export interface ServerToClientEvents {

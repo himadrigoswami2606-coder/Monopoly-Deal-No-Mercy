@@ -64,8 +64,8 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
       name: 'Shack',
       cashValue: 3,
       count: 3,
-      rule: 'Place on ANY property in your collection (single property, incomplete set, or complete set) to collect +$5M more rent when you play Rent or Double Rent!',
-      tip: 'Can be placed on any property right away! If you double rent, add the Shack +$5M first, then double the whole amount!',
+      rule: 'Place on ANY property in your collection (single property, incomplete set, or complete set) to collect +$3M more rent when you play Rent or Double Rent!',
+      tip: 'Can be placed on any property right away! Shows rent formula like Rent: $3M + $3M (Shack) = $6M.',
     },
     {
       type: ActionType.SLY_DEAL,
@@ -100,12 +100,12 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
       tip: 'Rent increases with complete sets and attached Houses (+ $3M) / Hotels (+ $4M).',
     },
     {
-      type: ActionType.DEBT_COLLECTOR,
-      name: 'Debt Collector',
+      type: ActionType.FORCED_DEBT,
+      name: 'Forced Debt',
       cashValue: 3,
       count: 3,
-      rule: 'Force 1 chosen player to pay you $5M in cash or properties.',
-      tip: 'Target players with high bank balances, or push a cash-strapped player into surrendering a Debt Chip.',
+      rule: 'Choose 1 opponent and force them to immediately surrender 1 of their Debt Chips to you! Can be countered by Just Say No.',
+      tip: 'Directly puts an opponent in debt to you without needing a money demand! (Replaces Debt Collector)',
     },
     {
       type: ActionType.ITS_MY_BIRTHDAY,

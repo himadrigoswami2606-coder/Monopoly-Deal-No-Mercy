@@ -13,6 +13,7 @@ import {
   PropertySet,
   DebtChip,
   ActionLogEntry,
+  PendingAction,
 } from '../../shared/types';
 import { createDeck, shuffleDeck, PROPERTY_CONFIG } from '../../shared/deckConfig';
 import { checkWinCondition } from './winCondition';
@@ -484,38 +485,30 @@ export class GameEngine {
       player.hand.splice(cardIndex, 1);
       room.gameState.discardPile.unshift(card);
 
-      const targetOpponent = room.players.find((p) => p.id === options?.targetPlayerId);
+      const isTargetedAction = [
+        ActionType.RENT,
+        ActionType.ITS_MY_BIRTHDAY,
+        ActionType.REPOSSESS,
+        ActionType.FORCED_DEBT,
+        ActionType.DEBT_COLLECTOR,
+        ActionType.SLY_DEAL,
+        ActionType.SUPER_SLY_DEAL,
+        ActionType.FORCED_DEAL,
+        ActionType.YOINK,
+        ActionType.TOUGH_LUCK,
+      ].includes(card.actionType!);
 
-      // AI Bot counter: If target is a Bot and has Just Say No in hand, it automatically counters harmful action!
-      if (
-        targetOpponent?.isBot &&
-        [
-          ActionType.SLY_DEAL,
-          ActionType.SUPER_SLY_DEAL,
-          ActionType.FORCED_DEAL,
-          ActionType.DEBT_COLLECTOR,
-          ActionType.YOINK,
-          ActionType.REPOSSESS,
-          ActionType.TOUGH_LUCK,
-        ].includes(card.actionType!)
-      ) {
-        const jsnIdx = targetOpponent.hand.findIndex(
-          (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
-        );
-        if (jsnIdx !== -1) {
-          const [jsnCard] = targetOpponent.hand.splice(jsnIdx, 1);
-          room.gameState.discardPile.unshift(jsnCard);
-          GameEngine.addLog(
-            room,
-            targetOpponent.id,
-            'JUST_SAY_NO_COUNTER',
-            `🛑 ${targetOpponent.displayName} played JUST SAY NO to block ${player.displayName}'s ${card.name}!`
-          );
-          room.gameState.playsUsedThisTurn++;
-          return { success: true };
+      if (isTargetedAction) {
+        room.gameState.playsUsedThisTurn++;
+        const initiated = GameEngine.initiateTargetedAction(room, player, card, options);
+        if (!initiated.success) {
+          return initiated;
         }
+        GameEngine.checkAndBroadcastWin(room, player);
+        return { success: true };
       }
 
+      // Self-only action cards:
       switch (card.actionType) {
         case ActionType.PASS_GO_GO_GO:
         case ActionType.PASS_GO: {
@@ -546,18 +539,242 @@ export class GameEngine {
           return { success: true };
         }
 
-        case ActionType.SLY_DEAL: {
-          // Steal 1 single property card from an incomplete set
-          if (!targetOpponent) {
-            GameEngine.addLog(room, playerId, 'SLY_DEAL_FAIL', `${player.displayName} played Sly Deal with no target.`);
-            break;
+        case ActionType.SHACK:
+        case ActionType.HOUSE:
+        case ActionType.HOTEL: {
+          const targetColor = options?.targetColor;
+          const set = player.properties.find((s) => s.color === targetColor);
+          if (targetColor && set) {
+            if (card.actionType === ActionType.SHACK || !set.isComplete) {
+              set.shack = true;
+              GameEngine.addLog(room, playerId, 'SHACK_ADDED', `🛖 ${player.displayName} placed a SHACK on their ${PROPERTY_CONFIG[targetColor].name} property (+ $3M rent)!`);
+            } else if (card.actionType === ActionType.HOUSE) {
+              set.house = true;
+              GameEngine.addLog(room, playerId, 'HOUSE_ADDED', `🏠 ${player.displayName} built a House on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $3M rent)!`);
+            } else {
+              set.hotel = true;
+              GameEngine.addLog(room, playerId, 'HOTEL_ADDED', `🏨 ${player.displayName} built a Hotel on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $4M rent)!`);
+            }
+          } else {
+            // Bank as cash if no eligible property
+            player.bank.push(card);
+            GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
           }
+          break;
+        }
+
+        default: {
+          player.bank.push(card);
+          GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
+          break;
+        }
+      }
+    }
+
+    room.gameState.playsUsedThisTurn++;
+    GameEngine.checkAndBroadcastWin(room, player);
+    return { success: true };
+  }
+
+  /**
+   * Initiates a targeted action against opponent(s):
+   * Sets up PendingAction for real-time response if target has Just Say No,
+   * or transitions to interactive payment (Rent/Birthday) or repossession,
+   * or executes direct action.
+   */
+  static initiateTargetedAction(
+    room: Room,
+    player: Player,
+    card: Card,
+    options?: any
+  ): { success: boolean; error?: string } {
+    if (!room.gameState) return { success: false, error: 'Game not active' };
+
+    // 1. Identify all target players
+    let targets: Player[] = [];
+    const targetOpponent = room.players.find((p) => p.id === options?.targetPlayerId);
+
+    let rentAmount = 0;
+    if (card.actionType === ActionType.RENT) {
+      const color = options?.targetColor as PropertyColor | undefined;
+      if (color && PROPERTY_CONFIG[color]) {
+        const set = player.properties.find((s) => s.color === color);
+        const count = set ? set.cards.length : 0;
+        rentAmount = PROPERTY_CONFIG[color]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[color]?.rentValues?.length || 1) - 1)] || 1;
+        if (set?.shack) rentAmount += 3; // Official Shack bonus: + $3M
+        if (set?.house) rentAmount += 3;
+        if (set?.hotel) rentAmount += 4;
+      }
+      targets = card.isWildRent && targetOpponent
+        ? [targetOpponent]
+        : room.players.filter((p) => p.id !== player.id);
+    } else if (card.actionType === ActionType.ITS_MY_BIRTHDAY) {
+      rentAmount = 2;
+      targets = room.players.filter((p) => p.id !== player.id);
+    } else if (card.actionType === ActionType.SUPER_SLY_DEAL) {
+      const chosenColor = options?.targetColor;
+      targets = room.players.filter(
+        (p) =>
+          p.id !== player.id &&
+          p.properties.some(
+            (s) =>
+              s.cards.some(
+                (c) =>
+                  c.color === chosenColor ||
+                  c.isRainbow ||
+                  (c.colors && c.colors.includes(chosenColor))
+              )
+          )
+      );
+      if (targets.length === 0 && targetOpponent) {
+        targets = [targetOpponent];
+      }
+    } else {
+      targets = targetOpponent ? [targetOpponent] : [];
+    }
+
+    if (targets.length === 0) {
+      GameEngine.addLog(room, player.id, 'ACTION_NO_TARGET', `${player.displayName} played ${card.name} with no eligible targets.`);
+      return { success: true };
+    }
+
+    const firstTarget = targets[0];
+    const targetHasJSN = firstTarget.hand.some(
+      (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+    );
+
+    // If target has Just Say No in hand, stage real-time prompt
+    if (targetHasJSN) {
+      room.gameState.pendingAction = {
+        id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        attackerId: player.id,
+        attackerName: player.displayName,
+        card,
+        actionType: card.actionType!,
+        targetPlayerId: firstTarget.id,
+        targetPlayerIds: targets.map((t) => t.id),
+        currentAwaitingPlayerId: firstTarget.id,
+        options,
+        rentAmount,
+        rentColor: options?.targetColor,
+        justSayNoChain: [],
+        status: 'AWAITING_JSN',
+        createdAt: Date.now(),
+      };
+      GameEngine.addLog(
+        room,
+        player.id,
+        'ACTION_INITIATED',
+        `🎯 ${player.displayName} played ${card.name} targeting ${firstTarget.displayName}!`
+      );
+      return { success: true };
+    }
+
+    // Target does NOT have Just Say No in hand:
+    if (card.actionType === ActionType.RENT || card.actionType === ActionType.ITS_MY_BIRTHDAY) {
+      room.gameState.pendingAction = {
+        id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        attackerId: player.id,
+        attackerName: player.displayName,
+        card,
+        actionType: card.actionType!,
+        targetPlayerId: firstTarget.id,
+        targetPlayerIds: targets.map((t) => t.id),
+        currentAwaitingPlayerId: firstTarget.id,
+        options,
+        rentAmount,
+        rentColor: options?.targetColor,
+        justSayNoChain: [],
+        status: 'AWAITING_PAYMENT',
+        createdAt: Date.now(),
+      };
+      GameEngine.addLog(
+        room,
+        player.id,
+        'RENT_DEMANDED',
+        `📢 ${player.displayName} demanded $${rentAmount}M from ${firstTarget.displayName} with ${card.name}!`
+      );
+      return { success: true };
+    }
+
+    if (card.actionType === ActionType.REPOSSESS) {
+      room.gameState.pendingAction = {
+        id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        attackerId: player.id,
+        attackerName: player.displayName,
+        card,
+        actionType: card.actionType!,
+        targetPlayerId: firstTarget.id,
+        targetPlayerIds: [firstTarget.id],
+        currentAwaitingPlayerId: firstTarget.id,
+        options,
+        justSayNoChain: [],
+        status: 'AWAITING_REPOSSESS',
+        createdAt: Date.now(),
+      };
+      GameEngine.addLog(
+        room,
+        player.id,
+        'REPOSSESS_INITIATED',
+        `🔨 ${player.displayName} played REPOSSESS against ${firstTarget.displayName}!`
+      );
+      return { success: true };
+    }
+
+    // Direct execution for other actions
+    GameEngine.executeDirectTargetedAction(room, player, card, options);
+    return { success: true };
+  }
+
+  /**
+   * Directly executes targeted action effect when no JSN is present.
+   */
+  static executeDirectTargetedAction(
+    room: Room,
+    player: Player,
+    card: Card,
+    options?: any
+  ): void {
+    const targetOpponent = room.players.find((p) => p.id === options?.targetPlayerId);
+
+    switch (card.actionType) {
+      case ActionType.FORCED_DEBT:
+      case ActionType.DEBT_COLLECTOR: {
+        if (targetOpponent) {
+          let chipIndex = targetOpponent.debtChips.findIndex((c) => c.ownerId === targetOpponent.id);
+          if (chipIndex === -1 && targetOpponent.debtChips.length > 0) chipIndex = 0;
+          if (chipIndex !== -1) {
+            const [chip] = targetOpponent.debtChips.splice(chipIndex, 1);
+            chip.currentHolderId = player.id;
+            chip.acquiredAt = Date.now();
+            player.debtChips.push(chip);
+            GameEngine.addLog(
+              room,
+              player.id,
+              'FORCED_DEBT_SUCCESS',
+              `🪙 ${player.displayName} played FORCED DEBT on ${targetOpponent.displayName} and stole 1 Debt Chip!`
+            );
+          } else {
+            GameEngine.addLog(
+              room,
+              player.id,
+              'FORCED_DEBT_EMPTY',
+              `${player.displayName} played Forced Debt, but ${targetOpponent.displayName} holds no Debt Chips!`
+            );
+          }
+        }
+        break;
+      }
+
+      case ActionType.SLY_DEAL: {
+        if (targetOpponent && options?.targetCardId) {
           let stolenCard: Card | null = null;
           for (const set of targetOpponent.properties) {
             if (!set.isComplete) {
-              const cIdx = set.cards.findIndex((c) => c.id === options?.targetCardId);
+              const cIdx = set.cards.findIndex((c) => c.id === options.targetCardId);
               if (cIdx !== -1) {
                 stolenCard = set.cards.splice(cIdx, 1)[0];
+                set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
                 if (set.cards.length === 0) {
                   targetOpponent.properties = targetOpponent.properties.filter((s) => s !== set);
                 }
@@ -566,37 +783,24 @@ export class GameEngine {
             }
           }
           if (stolenCard) {
-            const color = stolenCard.color || stolenCard.colors?.[0] || PropertyColor.DARK_BLUE;
-            let mySet = player.properties.find((s) => s.color === color);
-            if (!mySet) {
-              mySet = { color, cards: [], house: false, hotel: false, isComplete: false };
-              player.properties.push(mySet);
-            }
-            mySet.cards.push(stolenCard);
-            mySet.isComplete = mySet.cards.length >= PROPERTY_CONFIG[color].setSize;
+            GameEngine.giveCardToCreditor(player, stolenCard);
             GameEngine.addLog(
               room,
-              playerId,
+              player.id,
               'SLY_DEAL_SUCCESS',
-              `🧤 ${player.displayName} used Sly Deal to steal ${stolenCard.name} from ${targetOpponent.displayName}!`
+              `🧤 ${player.displayName} stole ${stolenCard.name} from ${targetOpponent.displayName} via Sly Deal!`
             );
-          } else {
-            GameEngine.addLog(room, playerId, 'SLY_DEAL', `${player.displayName} played Sly Deal against ${targetOpponent.displayName}.`);
           }
-          break;
         }
+        break;
+      }
 
-        case ActionType.SUPER_SLY_DEAL: {
-          // Official No Mercy rule: Choose one color. Steal ALL properties, even complete sets,
-          // in that color from EACH player's collection (including matching Two-Color Wilds and Every-Color Wilds)!
-          const chosenColor = options?.targetColor;
-          if (!chosenColor) {
-            GameEngine.addLog(room, playerId, 'SUPER_SLY_DEAL_FAIL', `${player.displayName} played Super Sly Deal without a target color.`);
-            break;
-          }
+      case ActionType.SUPER_SLY_DEAL: {
+        const chosenColor = options?.targetColor as PropertyColor | undefined;
+        if (chosenColor && PROPERTY_CONFIG[chosenColor]) {
           let totalStolen = 0;
           room.players.forEach((opp) => {
-            if (opp.id !== playerId) {
+            if (opp.id !== player.id) {
               opp.properties.forEach((set) => {
                 const stolenFromSet: Card[] = [];
                 set.cards = set.cards.filter((c) => {
@@ -610,7 +814,6 @@ export class GameEngine {
                   }
                   return true;
                 });
-
                 if (stolenFromSet.length > 0) {
                   totalStolen += stolenFromSet.length;
                   let mySet = player.properties.find((s) => s.color === chosenColor);
@@ -630,26 +833,25 @@ export class GameEngine {
               opp.properties = opp.properties.filter((s) => s.cards.length > 0);
             }
           });
-
           GameEngine.addLog(
             room,
-            playerId,
+            player.id,
             'SUPER_SLY_DEAL_SUCCESS',
-            `👑 ${player.displayName} unleashed SUPER SLY DEAL on ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor}! Stole ALL ${totalStolen} properties across every opponent!`
+            `👑 ${player.displayName} unleashed SUPER SLY DEAL on ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor}! Stole ALL ${totalStolen} properties across opponents!`
           );
-          break;
         }
+        break;
+      }
 
-        case ActionType.FORCED_DEAL: {
-          // Swap 1 property card
-          if (!targetOpponent) break;
-          // Find stolen card from opponent incomplete set
+      case ActionType.FORCED_DEAL: {
+        if (targetOpponent && options?.targetCardId && options?.myCardId) {
           let oppCard: Card | null = null;
           for (const set of targetOpponent.properties) {
             if (!set.isComplete) {
-              const cIdx = set.cards.findIndex((c) => c.id === options?.targetCardId);
+              const cIdx = set.cards.findIndex((c) => c.id === options.targetCardId);
               if (cIdx !== -1) {
                 oppCard = set.cards.splice(cIdx, 1)[0];
+                set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
                 if (set.cards.length === 0) {
                   targetOpponent.properties = targetOpponent.properties.filter((s) => s !== set);
                 }
@@ -657,13 +859,13 @@ export class GameEngine {
               }
             }
           }
-          // Find player's card to give
           let myCard: Card | null = null;
           for (const set of player.properties) {
             if (!set.isComplete) {
-              const cIdx = set.cards.findIndex((c) => c.id === options?.myCardId);
+              const cIdx = set.cards.findIndex((c) => c.id === options.myCardId);
               if (cIdx !== -1) {
                 myCard = set.cards.splice(cIdx, 1)[0];
+                set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
                 if (set.cards.length === 0) {
                   player.properties = player.properties.filter((s) => s !== set);
                 }
@@ -672,239 +874,423 @@ export class GameEngine {
             }
           }
           if (oppCard && myCard) {
-            // Put oppCard into player
-            const c1 = oppCard.color || oppCard.colors?.[0] || PropertyColor.DARK_BLUE;
-            let s1 = player.properties.find((s) => s.color === c1);
-            if (!s1) {
-              s1 = { color: c1, cards: [], house: false, hotel: false, isComplete: false };
-              player.properties.push(s1);
-            }
-            s1.cards.push(oppCard);
-
-            // Put myCard into target
-            const c2 = myCard.color || myCard.colors?.[0] || PropertyColor.DARK_BLUE;
-            let s2 = targetOpponent.properties.find((s) => s.color === c2);
-            if (!s2) {
-              s2 = { color: c2, cards: [], house: false, hotel: false, isComplete: false };
-              targetOpponent.properties.push(s2);
-            }
-            s2.cards.push(myCard);
-
+            GameEngine.giveCardToCreditor(player, oppCard);
+            GameEngine.giveCardToCreditor(targetOpponent, myCard);
             GameEngine.addLog(
               room,
-              playerId,
+              player.id,
               'FORCED_DEAL_SUCCESS',
               `🔄 ${player.displayName} forced a swap: gave ${myCard.name} to ${targetOpponent.displayName} for ${oppCard.name}!`
             );
           }
-          break;
         }
+        break;
+      }
 
-        case ActionType.DEBT_COLLECTOR: {
-          // Force 1 player to pay $5M
-          if (targetOpponent) {
-            let collected = 0;
-            // Take cash from bank first
-            while (targetOpponent.bank.length > 0 && collected < 5) {
-              const c = targetOpponent.bank.pop()!;
-              collected += c.cashValue;
-              player.bank.push(c);
-            }
-            // If still owe, take debt chip!
-            if (collected < 5 && targetOpponent.debtChips.length > 0) {
-              const chip = targetOpponent.debtChips.pop()!;
-              chip.currentHolderId = player.id;
-              chip.acquiredAt = Date.now();
-              player.debtChips.push(chip);
-              GameEngine.addLog(
-                room,
-                playerId,
-                'DEBT_CHIP_TAKEN',
-                `🪙 ${targetOpponent.displayName} could not pay in full and surrendered a Debt Chip to ${player.displayName}!`
-              );
-            }
-            GameEngine.addLog(
-              room,
-              playerId,
-              'DEBT_COLLECTED',
-              `💰 ${player.displayName} collected $${collected}M from ${targetOpponent.displayName} using Debt Collector!`
-            );
+      case ActionType.YOINK: {
+        if (targetOpponent) {
+          let stolen = 0;
+          while (targetOpponent.bank.length > 0 && stolen < 10) {
+            const b = targetOpponent.bank.pop()!;
+            stolen += b.cashValue;
+            player.bank.push(b);
           }
-          break;
-        }
-
-        case ActionType.ITS_MY_BIRTHDAY: {
-          // Force all other players to pay $2M each
-          let totalCollected = 0;
-          room.players.forEach((other) => {
-            if (other.id !== playerId) {
-              if (other.bank.length > 0) {
-                const b = other.bank.pop()!;
-                totalCollected += b.cashValue;
-                player.bank.push(b);
-              } else if (other.debtChips.length > 0) {
-                const chip = other.debtChips.pop()!;
-                chip.currentHolderId = player.id;
-                chip.acquiredAt = Date.now();
-                player.debtChips.push(chip);
-                GameEngine.addLog(
-                  room,
-                  other.id,
-                  'DEBT_CHIP_SURRENDER',
-                  `🪙 ${other.displayName} could not pay $2M Birthday demand and surrendered a Debt Chip to ${player.displayName}!`
-                );
-              }
-            }
-          });
           GameEngine.addLog(
             room,
-            playerId,
-            'BIRTHDAY_CELEBRATION',
-            `🎂 It's ${player.displayName}'s Birthday! Collected $${totalCollected}M from opponents!`
+            player.id,
+            'YOINK_SUCCESS',
+            `🧲 YOINK! ${player.displayName} snatched $${stolen}M in cash directly from ${targetOpponent.displayName}'s Bank!`
           );
-          break;
         }
+        break;
+      }
 
-        case ActionType.YOINK: {
-          // Steal up to $10M directly from 1 opponent's bank
-          if (targetOpponent) {
-            let stolenAmount = 0;
-            while (targetOpponent.bank.length > 0 && stolenAmount < 10) {
-              const b = targetOpponent.bank.pop()!;
-              stolenAmount += b.cashValue;
-              player.bank.push(b);
-            }
-            GameEngine.addLog(
-              room,
-              playerId,
-              'YOINK_SUCCESS',
-              `🧲 YOINK! ${player.displayName} snatched $${stolenAmount}M in cash directly from ${targetOpponent.displayName}'s Bank!`
-            );
-          }
-          break;
+      case ActionType.TOUGH_LUCK: {
+        if (targetOpponent && options?.chosenCategory) {
+          const cat = options.chosenCategory;
+          const stolen: Card[] = [];
+          targetOpponent.hand = targetOpponent.hand.filter((c) => {
+            const match =
+              (cat === 'MONEY' && c.type === CardType.MONEY) ||
+              (cat === 'PROPERTY' && (c.type === CardType.PROPERTY || c.type === CardType.PROPERTY_WILDCARD)) ||
+              (cat === 'ACTION' && c.type === CardType.ACTION);
+            if (match) stolen.push(c);
+            return !match;
+          });
+          player.hand.push(...stolen);
+          GameEngine.addLog(
+            room,
+            player.id,
+            'TOUGH_LUCK_STEAL',
+            `☠️ Tough Luck! ${player.displayName} stole ALL ${cat} cards (${stolen.length} cards) directly from ${targetOpponent.displayName}'s hand into their own hand!`
+          );
         }
+        break;
+      }
+    }
+  }
 
-        case ActionType.TOUGH_LUCK: {
-          // Official No Mercy rule: Choose a player and steal all property, action, or money cards
-          // from their hand. Put the stolen cards directly into your hand!
-          if (targetOpponent && options?.chosenCategory) {
-            const cat = options.chosenCategory;
-            const stolen: Card[] = [];
-            targetOpponent.hand = targetOpponent.hand.filter((c) => {
-              const match =
-                (cat === 'MONEY' && c.type === CardType.MONEY) ||
-                (cat === 'PROPERTY' && (c.type === CardType.PROPERTY || c.type === CardType.PROPERTY_WILDCARD)) ||
-                (cat === 'ACTION' && c.type === CardType.ACTION);
-              if (match) stolen.push(c);
-              return !match;
-            });
-            player.hand.push(...stolen);
-            GameEngine.addLog(
-              room,
-              playerId,
-              'TOUGH_LUCK_STEAL',
-              `☠️ Tough Luck! ${player.displayName} stole ALL ${cat} cards (${stolen.length} cards) directly from ${targetOpponent.displayName}'s hand into their own hand!`
-            );
-          }
-          break;
+  /**
+   * Advances a multi-target PendingAction (Rent / Birthday) to the next target,
+   * or clears pendingAction if all targets are resolved.
+   */
+  static advancePendingActionToNextTarget(room: Room): void {
+    if (!room.gameState?.pendingAction) return;
+    const pending = room.gameState.pendingAction;
+    if (pending.targetPlayerIds && pending.targetPlayerIds.length > 0) {
+      pending.targetPlayerIds = pending.targetPlayerIds.filter((id) => id !== pending.currentAwaitingPlayerId);
+      if (pending.targetPlayerIds.length > 0) {
+        const nextTargetId = pending.targetPlayerIds[0];
+        pending.currentAwaitingPlayerId = nextTargetId;
+        pending.targetPlayerId = nextTargetId;
+        const nextPlayer = room.players.find((p) => p.id === nextTargetId);
+        const hasJSN = nextPlayer?.hand.some(
+          (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+        );
+        pending.status = hasJSN ? 'AWAITING_JSN' : 'AWAITING_PAYMENT';
+        return;
+      }
+    }
+    room.gameState.pendingAction = null;
+  }
+
+  /**
+   * Proceeds action after Just Say No check has concluded.
+   */
+  static proceedPendingActionAfterJSN(room: Room): void {
+    if (!room.gameState?.pendingAction) return;
+    const pending = room.gameState.pendingAction;
+    if (pending.actionType === ActionType.RENT || pending.actionType === ActionType.ITS_MY_BIRTHDAY) {
+      pending.status = 'AWAITING_PAYMENT';
+    } else if (pending.actionType === ActionType.REPOSSESS) {
+      pending.status = 'AWAITING_REPOSSESS';
+    } else {
+      const attacker = room.players.find((p) => p.id === pending.attackerId);
+      if (attacker) {
+        GameEngine.executeDirectTargetedAction(room, attacker, pending.card, pending.options);
+      }
+      GameEngine.advancePendingActionToNextTarget(room);
+    }
+  }
+
+  /**
+   * Responds to an awaiting Just Say No prompt.
+   */
+  static respondJustSayNo(
+    room: Room,
+    responderId: string,
+    actionId: string,
+    accept: boolean,
+    jsnCardId?: string
+  ): { success: boolean; error?: string } {
+    if (!room.gameState || !room.gameState.pendingAction || room.gameState.pendingAction.id !== actionId) {
+      return { success: false, error: 'No active action awaiting reaction' };
+    }
+    const pending = room.gameState.pendingAction;
+    if (pending.currentAwaitingPlayerId !== responderId) {
+      return { success: false, error: 'Not your turn to respond' };
+    }
+
+    const responder = room.players.find((p) => p.id === responderId);
+    if (!responder) return { success: false, error: 'Player not found' };
+
+    if (!accept) {
+      // Responder chose to play Just Say No!
+      const jsnIdx = responder.hand.findIndex(
+        (c) =>
+          c.type === CardType.ACTION &&
+          c.actionType === ActionType.JUST_SAY_NO &&
+          (!jsnCardId || c.id === jsnCardId)
+      );
+      if (jsnIdx === -1) {
+        return { success: false, error: 'You do not have a Just Say No card in hand' };
+      }
+      const [jsnCard] = responder.hand.splice(jsnIdx, 1);
+      room.gameState.discardPile.unshift(jsnCard);
+      pending.justSayNoChain.push({
+        playerId: responder.id,
+        playerName: responder.displayName,
+        cardId: jsnCard.id,
+      });
+
+      GameEngine.addLog(
+        room,
+        responder.id,
+        'JUST_SAY_NO_PLAYED',
+        `🛑 ${responder.displayName} played JUST SAY NO to block ${pending.attackerName}'s ${pending.card.name}!`
+      );
+
+      // Check counter-possibility
+      if (responderId !== pending.attackerId) {
+        // Target played JSN. Can the attacker counter with their own JSN?
+        const attacker = room.players.find((p) => p.id === pending.attackerId);
+        const attackerHasJSN = attacker?.hand.some(
+          (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+        );
+        if (attackerHasJSN) {
+          pending.currentAwaitingPlayerId = pending.attackerId;
+          pending.status = 'AWAITING_JSN';
+          return { success: true };
         }
-
-        case ActionType.REPOSSESS: {
-          // Opponent gives all properties except 1
-          if (targetOpponent && targetOpponent.properties.length > 0) {
-            let surrenderedCount = 0;
-            // Leave first property, take all others
-            while (targetOpponent.properties.length > 1) {
-              const set = targetOpponent.properties.pop()!;
-              player.properties.push(set);
-              surrenderedCount += set.cards.length;
-            }
-            GameEngine.addLog(
-              room,
-              playerId,
-              'REPOSSESSION',
-              `🔨 Repossess! ${targetOpponent.displayName} was forced to surrender all property sets except 1 to ${player.displayName} (${surrenderedCount} cards)!`
-            );
-          }
-          break;
+      } else {
+        // Attacker countered target's JSN. Can target counter again?
+        const target = room.players.find((p) => p.id === pending.targetPlayerId);
+        const targetHasJSN = target?.hand.some(
+          (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+        );
+        if (targetHasJSN && target) {
+          pending.currentAwaitingPlayerId = target.id;
+          pending.status = 'AWAITING_JSN';
+          return { success: true };
         }
+      }
 
-        case ActionType.RENT: {
-          // Charge rent for chosen color
-          const targetColor = options?.targetColor;
-          if (targetColor) {
-            const set = player.properties.find((s) => s.color === targetColor);
-            const count = set ? set.cards.length : 0;
-            let rent = PROPERTY_CONFIG[targetColor]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[targetColor]?.rentValues?.length || 1) - 1)] || 1;
-            if (set?.shack) rent += 5;
-            if (set?.house) rent += 3;
-            if (set?.hotel) rent += 4;
+      // No counters possible: check who won the JSN chain
+      if (pending.justSayNoChain.length % 2 === 1) {
+        // Action was successfully blocked!
+        GameEngine.addLog(
+          room,
+          responder.id,
+          'ACTION_CANCELLED',
+          `✋ ${pending.card.name} was successfully blocked by Just Say No!`
+        );
+        GameEngine.advancePendingActionToNextTarget(room);
+        return { success: true };
+      } else {
+        // Attacker countered target's block! Action proceeds
+        GameEngine.proceedPendingActionAfterJSN(room);
+        return { success: true };
+      }
+    } else {
+      // Responder chose to ACCEPT (or declined to play JSN)
+      if (pending.justSayNoChain.length % 2 === 1) {
+        // Attacker accepted target's JSN block
+        GameEngine.addLog(
+          room,
+          responder.id,
+          'ACTION_CANCELLED',
+          `✋ ${pending.card.name} was cancelled by Just Say No.`
+        );
+        GameEngine.advancePendingActionToNextTarget(room);
+        return { success: true };
+      } else {
+        // Target accepted the action
+        GameEngine.proceedPendingActionAfterJSN(room);
+        return { success: true };
+      }
+    }
+  }
 
-            // Charge target or all players
-            const targets = card.isWildRent && targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== playerId);
-            let totalPaid = 0;
+  /**
+   * Submits payment for Rent or Birthday demands (Point 6).
+   */
+  static submitPayment(
+    room: Room,
+    payerId: string,
+    actionId: string,
+    selectedCardIds: string[],
+    surrenderDebtChip?: boolean
+  ): { success: boolean; error?: string } {
+    if (!room.gameState?.pendingAction || room.gameState.pendingAction.id !== actionId) {
+      return { success: false, error: 'No active payment demand found' };
+    }
+    const pending = room.gameState.pendingAction;
+    if (pending.currentAwaitingPlayerId !== payerId) {
+      return { success: false, error: 'Not your turn to pay' };
+    }
 
-            targets.forEach((tgt) => {
-              if (tgt.bank.length > 0) {
-                const b = tgt.bank.pop()!;
-                totalPaid += b.cashValue;
-                player.bank.push(b);
-              } else if (tgt.debtChips.length > 0) {
-                // Surrender a Debt Chip if bank is empty
-                const chip = tgt.debtChips.pop()!;
-                chip.currentHolderId = player.id;
-                chip.acquiredAt = Date.now();
-                player.debtChips.push(chip);
-                GameEngine.addLog(room, tgt.id, 'DEBT_CHIP_SURRENDER', `🪙 ${tgt.displayName} had no cash to pay rent and surrendered a Debt Chip to ${player.displayName}!`);
-              }
-            });
+    const payer = room.players.find((p) => p.id === payerId);
+    const creditor = room.players.find((p) => p.id === pending.attackerId);
+    if (!payer || !creditor) {
+      return { success: false, error: 'Player not found' };
+    }
 
-            GameEngine.addLog(
-              room,
-              playerId,
-              'RENT_CHARGED',
-              `📢 ${player.displayName} charged $${rent}M ${PROPERTY_CONFIG[targetColor].name} rent! Total collected: $${totalPaid}M.`
-            );
-          }
-          break;
-        }
+    let totalPaid = 0;
 
-        case ActionType.SHACK:
-        case ActionType.HOUSE:
-        case ActionType.HOTEL: {
-          const targetColor = options?.targetColor;
-          const set = player.properties.find((s) => s.color === targetColor);
-          if (targetColor && set) {
-            if (card.actionType === ActionType.SHACK || !set.isComplete) {
-              set.shack = true;
-              GameEngine.addLog(room, playerId, 'SHACK_ADDED', `🛖 ${player.displayName} placed a SHACK on their ${PROPERTY_CONFIG[targetColor].name} property (+ $5M rent)!`);
-            } else if (card.actionType === ActionType.HOUSE) {
-              set.house = true;
-              GameEngine.addLog(room, playerId, 'HOUSE_ADDED', `🏠 ${player.displayName} built a House on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $3M rent)!`);
-            } else {
-              set.hotel = true;
-              GameEngine.addLog(room, playerId, 'HOTEL_ADDED', `🏨 ${player.displayName} built a Hotel on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $4M rent)!`);
-            }
-          } else {
-            // Bank as cash if no eligible property
-            player.bank.push(card);
-            GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
-          }
-          break;
-        }
+    // 1. Bank cards transfer
+    selectedCardIds.forEach((id) => {
+      const bIdx = payer.bank.findIndex((c) => c.id === id);
+      if (bIdx !== -1) {
+        const [bCard] = payer.bank.splice(bIdx, 1);
+        creditor.bank.push(bCard);
+        totalPaid += bCard.cashValue;
+      }
+    });
 
-        default: {
-          // Bank any other action
-          player.bank.push(card);
-          GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
+    // 2. Property cards transfer
+    selectedCardIds.forEach((id) => {
+      for (const set of payer.properties) {
+        const pIdx = set.cards.findIndex((c) => c.id === id);
+        if (pIdx !== -1) {
+          const [pCard] = set.cards.splice(pIdx, 1);
+          set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
+          totalPaid += pCard.cashValue;
+          GameEngine.giveCardToCreditor(creditor, pCard);
           break;
         }
       }
+    });
+    payer.properties = payer.properties.filter((s) => s.cards.length > 0);
+
+    // 3. Debt Chip surrender if insolvent or indicated (Points 6 & 10)
+    if (surrenderDebtChip) {
+      let chipIdx = payer.debtChips.findIndex((c) => c.ownerId === payer.id);
+      if (chipIdx === -1 && payer.debtChips.length > 0) chipIdx = 0;
+      if (chipIdx !== -1) {
+        const [chip] = payer.debtChips.splice(chipIdx, 1);
+        chip.currentHolderId = creditor.id;
+        chip.acquiredAt = Date.now();
+        creditor.debtChips.push(chip);
+        GameEngine.addLog(
+          room,
+          payer.id,
+          'DEBT_CHIP_SURRENDER',
+          `🪙 ${payer.displayName} surrendered a Debt Chip to ${creditor.displayName}!`
+        );
+      }
     }
 
-    room.gameState.playsUsedThisTurn++;
-    GameEngine.checkAndBroadcastWin(room, player);
+    GameEngine.addLog(
+      room,
+      payer.id,
+      'PAYMENT_SUBMITTED',
+      `💰 ${payer.displayName} paid $${totalPaid}M to ${creditor.displayName} for ${pending.card.name}.`
+    );
 
+    GameEngine.checkAndBroadcastWin(room, payer);
+    GameEngine.checkAndBroadcastWin(room, creditor);
+
+    GameEngine.advancePendingActionToNextTarget(room);
+    return { success: true };
+  }
+
+  /**
+   * Submits repossession property distribution (Point 7).
+   */
+  static submitRepossess(
+    room: Room,
+    targetId: string,
+    actionId: string,
+    keepCardId: string,
+    distributions: { cardId: string; targetPlayerId: string }[]
+  ): { success: boolean; error?: string } {
+    if (!room.gameState?.pendingAction || room.gameState.pendingAction.id !== actionId) {
+      return { success: false, error: 'No active repossession found' };
+    }
+    const pending = room.gameState.pendingAction;
+    if (pending.currentAwaitingPlayerId !== targetId) {
+      return { success: false, error: 'Not your turn to repossess' };
+    }
+
+    const target = room.players.find((p) => p.id === targetId);
+    if (!target) return { success: false, error: 'Player not found' };
+
+    let keptCardName = '';
+    distributions.forEach(({ cardId, targetPlayerId }) => {
+      if (cardId === keepCardId) return;
+      const destPlayer = room.players.find((p) => p.id === targetPlayerId);
+      if (!destPlayer) return;
+
+      for (const set of target.properties) {
+        const cIdx = set.cards.findIndex((c) => c.id === cardId);
+        if (cIdx !== -1) {
+          const [card] = set.cards.splice(cIdx, 1);
+          set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
+          GameEngine.giveCardToCreditor(destPlayer, card);
+          break;
+        }
+      }
+    });
+    target.properties = target.properties.filter((s) => s.cards.length > 0);
+
+    for (const set of target.properties) {
+      const k = set.cards.find((c) => c.id === keepCardId);
+      if (k) keptCardName = k.name;
+    }
+
+    GameEngine.addLog(
+      room,
+      target.id,
+      'REPOSSESSION_COMPLETE',
+      `🔨 ${target.displayName} kept ${keptCardName || '1 property'} and distributed all other properties across players!`
+    );
+
+    room.players.forEach((p) => GameEngine.checkAndBroadcastWin(room, p));
+    room.gameState.pendingAction = null;
+    return { success: true };
+  }
+
+  /**
+   * Flips a wildcard between colors.
+   * Point 5: Costs 1 play (playsUsedThisTurn++).
+   * Point 9: Rainbow wildcards can only be placed on/moved to colors already owned in properties!
+   */
+  static flipWildcard(
+    room: Room,
+    playerId: string,
+    cardId: string,
+    toColor: PropertyColor
+  ): { success: boolean; error?: string } {
+    if (!room.gameState || room.gameState.isGameOver) {
+      return { success: false, error: 'Game is not active' };
+    }
+    if (room.gameState.activePlayerId !== playerId) {
+      return { success: false, error: 'You can only flip wildcards on your turn' };
+    }
+    if (room.gameState.playsUsedThisTurn >= room.gameState.maxPlaysPerTurn) {
+      return { success: false, error: 'No plays remaining this turn (max 3)' };
+    }
+
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) return { success: false, error: 'Player not found' };
+
+    let foundCard: Card | null = null;
+    for (const set of player.properties) {
+      const idx = set.cards.findIndex((c) => c.id === cardId);
+      if (idx !== -1) {
+        foundCard = set.cards.splice(idx, 1)[0];
+        set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
+        if (set.cards.length === 0) {
+          player.properties = player.properties.filter((s) => s !== set);
+        }
+        break;
+      }
+    }
+
+    if (!foundCard) {
+      return { success: false, error: 'Wildcard not found in your properties' };
+    }
+
+    // Point 9: Rainbow wildcard color restriction
+    if (foundCard.isRainbow) {
+      const playerHasColor = player.properties.some((s) => s.color === toColor);
+      if (!playerHasColor) {
+        return {
+          success: false,
+          error: 'Rainbow Wildcard can only be placed on a color you already own in your properties!',
+        };
+      }
+    }
+
+    let targetSet = player.properties.find((s) => s.color === toColor);
+    if (!targetSet) {
+      targetSet = { color: toColor, cards: [], house: false, hotel: false, isComplete: false };
+      player.properties.push(targetSet);
+    }
+    targetSet.cards.push(foundCard);
+    targetSet.isComplete = targetSet.cards.length >= (PROPERTY_CONFIG[toColor]?.setSize || 3);
+
+    // Point 5: Flipping a wildcard costs 1 play!
+    room.gameState.playsUsedThisTurn++;
+
+    GameEngine.addLog(
+      room,
+      playerId,
+      'FLIP_WILDCARD',
+      `🔄 ${player.displayName} flipped wildcard ${foundCard.name} to ${PROPERTY_CONFIG[toColor]?.name || toColor} (costs 1 play).`
+    );
+
+    GameEngine.checkAndBroadcastWin(room, player);
     return { success: true };
   }
 
@@ -1006,8 +1392,13 @@ export class GameEngine {
 
   /**
    * Ends the active player's turn and advances to next player.
+   * Point 2: Player must choose which cards to discard if hand > 7 cards.
    */
-  static endTurn(room: Room, playerId: string): { success: boolean; error?: string } {
+  static endTurn(
+    room: Room,
+    playerId: string,
+    discardCardIds?: string[]
+  ): { success: boolean; error?: string } {
     if (!room.gameState || room.gameState.isGameOver) {
       return { success: false, error: 'Game is not active' };
     }
@@ -1016,24 +1407,59 @@ export class GameEngine {
       return { success: false, error: 'Not your turn to end' };
     }
 
+    if (room.gameState.pendingAction) {
+      return { success: false, error: 'Cannot end turn while an action is awaiting resolution' };
+    }
+
+    if (room.gameState.pendingDebtSettlement?.playerId === playerId) {
+      return { success: false, error: 'Cannot end turn while debt settlement is pending' };
+    }
+
     const currentIndex = room.players.findIndex((p) => p.id === playerId);
     const nextIndex = (currentIndex + 1) % room.players.length;
     const nextPlayer = room.players[nextIndex];
 
     const currentPlr = room.players[currentIndex];
 
-    // Enforce 7-card hand limit at end of turn (official Monopoly Deal rules)
+    // Point 2: Enforce 7-card hand limit at end of turn of the player's own choice
     if (currentPlr.hand.length > 7) {
       const excessCount = currentPlr.hand.length - 7;
-      // Discard lowest priority excess cards
-      const discarded = currentPlr.hand.splice(7, excessCount);
-      room.gameState.discardPile.unshift(...discarded);
-      GameEngine.addLog(
-        room,
-        playerId,
-        'DISCARD_EXCESS',
-        `🗑️ ${currentPlr.displayName} discarded ${excessCount} excess card${excessCount > 1 ? 's' : ''} to meet the 7-card hand limit.`
-      );
+      if (!currentPlr.isBot) {
+        if (!discardCardIds || discardCardIds.length !== excessCount) {
+          return {
+            success: false,
+            error: `Hand limit is 7 cards! You have ${currentPlr.hand.length} cards and must select ${excessCount} card${excessCount > 1 ? 's' : ''} to discard.`,
+          };
+        }
+        // Remove chosen cards from hand
+        const discarded: Card[] = [];
+        for (const cId of discardCardIds) {
+          const idx = currentPlr.hand.findIndex((c) => c.id === cId);
+          if (idx !== -1) {
+            discarded.push(...currentPlr.hand.splice(idx, 1));
+          }
+        }
+        room.gameState.discardPile.unshift(...discarded);
+        GameEngine.addLog(
+          room,
+          playerId,
+          'DISCARD_EXCESS',
+          `🗑️ ${currentPlr.displayName} discarded ${discarded.length} excess card${discarded.length > 1 ? 's' : ''} of their choice to meet the 7-card hand limit.`
+        );
+      } else {
+        // Bot automatically discards lowest-value excess cards
+        const sorted = [...currentPlr.hand].sort((a, b) => a.cashValue - b.cashValue);
+        const toDiscard = sorted.slice(0, excessCount);
+        const toDiscardIds = new Set(toDiscard.map((c) => c.id));
+        currentPlr.hand = currentPlr.hand.filter((c) => !toDiscardIds.has(c.id));
+        room.gameState.discardPile.unshift(...toDiscard);
+        GameEngine.addLog(
+          room,
+          playerId,
+          'DISCARD_EXCESS',
+          `🗑️ ${currentPlr.displayName} discarded ${excessCount} excess card${excessCount > 1 ? 's' : ''} to meet the 7-card hand limit.`
+        );
+      }
     }
 
     GameEngine.addLog(

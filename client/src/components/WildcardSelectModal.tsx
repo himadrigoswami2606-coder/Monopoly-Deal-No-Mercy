@@ -15,7 +15,18 @@ export const WildcardSelectModal: React.FC<WildcardSelectModalProps> = ({
   onSelectColor,
   onCancel,
 }) => {
-  const eligibleColors = (card.colors || Object.keys(PROPERTY_CONFIG) as PropertyColor[]);
+  // For rainbow wildcard, only allow colors the player currently owns in their properties
+  const ownedColors = Array.from(
+    new Set(
+      myPlayer.properties
+        .filter((s) => s.cards.length > 0)
+        .map((s) => s.color)
+    )
+  );
+
+  const eligibleColors = card.isRainbow
+    ? ownedColors
+    : (card.colors || (Object.keys(PROPERTY_CONFIG) as PropertyColor[]));
 
   // Find which set is closer to completion to badge with 'BEST'
   let bestColor = eligibleColors[0];
@@ -55,13 +66,21 @@ export const WildcardSelectModal: React.FC<WildcardSelectModalProps> = ({
         </p>
 
         {/* Side-by-Side Color Tiles (Identical to Screenshot 1) */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
-          {eligibleColors.map((color) => {
-            const meta = PROPERTY_CONFIG[color];
-            const set = myPlayer.properties.find((s) => s.color === color);
-            const currentCount = set ? set.cards.length : 0;
-            const newCount = currentCount + 1;
-            const isBest = color === bestColor && currentCount > 0;
+        {eligibleColors.length === 0 ? (
+          <div className="p-4 bg-black/40 rounded-2xl border border-amber-500/30 text-center my-4">
+            <p className="text-amber-400 font-bold text-xs uppercase mb-1">No Eligible Property Sets</p>
+            <p className="text-[11px] text-slate-300">
+              According to Monopoly Deal: No Mercy rules, a Rainbow Wildcard can only be placed on or flipped to a color you currently own in your properties!
+            </p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">
+            {eligibleColors.map((color) => {
+              const meta = PROPERTY_CONFIG[color];
+              const set = myPlayer.properties.find((s) => s.color === color);
+              const currentCount = set ? set.cards.length : 0;
+              const newCount = currentCount + 1;
+              const isBest = color === bestColor && currentCount > 0;
 
             return (
               <div
@@ -124,6 +143,7 @@ export const WildcardSelectModal: React.FC<WildcardSelectModalProps> = ({
             );
           })}
         </div>
+      )}
       </div>
     </div>
   );

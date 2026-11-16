@@ -12,10 +12,13 @@ import {
   PropertyColor,
   EVENT_PLAY_CARD,
   EVENT_END_TURN,
-  EVENT_DRAW_CARDS,
   EVENT_LEAVE_ROOM,
   EVENT_SETTLE_DEBT,
   EVENT_RESOLVE_DEBT_DRAW,
+  EVENT_RESPOND_JUST_SAY_NO,
+  EVENT_SUBMIT_PAYMENT,
+  EVENT_SUBMIT_REPOSSESS,
+  EVENT_FLIP_WILDCARD,
 } from '../../../shared/types';
 import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
@@ -23,7 +26,10 @@ import { ActionTargetModal } from './ActionTargetModal';
 import { ActionReactionModal } from './ActionReactionModal';
 import { WildcardSelectModal } from './WildcardSelectModal';
 import { RulesHelpModal } from './RulesHelpModal';
+import { HandLimitDiscardModal } from './HandLimitDiscardModal';
+import { RepossessModal } from './RepossessModal';
 import { PLAYER_COLORS } from './PlayerCard';
+import { getDebtChipTheme } from '../utils/debtChipThemes';
 import { sounds } from '../utils/audio';
 
 interface GameBoardProps {
@@ -44,11 +50,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const { socket } = useSocket();
   const [targetingCard, setTargetingCard] = useState<Card | null>(null);
   const [wildcardModalCard, setWildcardModalCard] = useState<Card | null>(null);
-  const [reactionModalData, setReactionModalData] = useState<{
-    attackerName: string;
-    demandDescription: string;
-    amountDue: number;
-  } | null>(null);
   const [showLogDrawer, setShowLogDrawer] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
 
@@ -75,32 +76,37 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
   );
 
+  const [showHandLimitModal, setShowHandLimitModal] = useState(false);
+  const [flipRainbowCard, setFlipRainbowCard] = useState<Card | null>(null);
+
   // Initiating card play
   const handleInitiatePlay = (card: Card) => {
-    if (!isMyTurn || pendingSettlement) return;
+    if (!isMyTurn || pendingSettlement || gameState.pendingAction) return;
 
-    // 1. Wildcard modal (Screenshot 1)
+    // 1. Dual-color wildcard modal (Screenshot 1)
     if (card.type === CardType.PROPERTY_WILDCARD && !card.isRainbow) {
       setWildcardModalCard(card);
       return;
     }
 
-    // 2. Action targeting modal
+    // 2. Rainbow wildcard or targeted action modal
     const needsTargetModal =
-      card.type === CardType.ACTION &&
-      [
-        ActionType.SLY_DEAL,
-        ActionType.SUPER_SLY_DEAL,
-        ActionType.FORCED_DEAL,
-        ActionType.DEBT_COLLECTOR,
-        ActionType.YOINK,
-        ActionType.REPOSSESS,
-        ActionType.TOUGH_LUCK,
-        ActionType.RENT,
-        ActionType.SHACK,
-        ActionType.HOUSE,
-        ActionType.HOTEL,
-      ].includes(card.actionType!);
+      (card.type === CardType.PROPERTY_WILDCARD && card.isRainbow) ||
+      (card.type === CardType.ACTION &&
+        [
+          ActionType.SLY_DEAL,
+          ActionType.SUPER_SLY_DEAL,
+          ActionType.FORCED_DEAL,
+          ActionType.FORCED_DEBT,
+          ActionType.DEBT_COLLECTOR,
+          ActionType.YOINK,
+          ActionType.REPOSSESS,
+          ActionType.TOUGH_LUCK,
+          ActionType.RENT,
+          ActionType.SHACK,
+          ActionType.HOUSE,
+          ActionType.HOTEL,
+        ].includes(card.actionType!));
 
     if (needsTargetModal) {
       setTargetingCard(card);
@@ -149,16 +155,54 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     });
   };
 
+  // Point 2: Hand limit discard choice
   const handleEndTurn = () => {
-    if (!isMyTurn || pendingSettlement) return;
+    if (!isMyTurn || pendingSettlement || gameState.pendingAction) return;
+    if (myHand.length > 7) {
+      setShowHandLimitModal(true);
+      return;
+    }
     sounds.playDrawCard();
     socket?.emit(EVENT_END_TURN);
   };
 
-  const handleDrawCards = () => {
-    if (!isMyTurn) return;
+  const handleConfirmHandLimitDiscard = (discardCardIds: string[]) => {
     sounds.playDrawCard();
-    socket?.emit(EVENT_DRAW_CARDS);
+    socket?.emit(EVENT_END_TURN, { discardCardIds });
+    setShowHandLimitModal(false);
+  };
+
+  // Point 5 & 9: Flipping wildcards costs 1 play
+  const handleFlipWildcardInSet = (card: Card, currentColor: PropertyColor) => {
+    if (!isMyTurn) return;
+    if (gameState.playsUsedThisTurn >= gameState.maxPlaysPerTurn) {
+      alert('No plays remaining this turn! (Max 3 plays per turn)');
+      return;
+    }
+
+    if (card.isRainbow) {
+      setFlipRainbowCard(card);
+      return;
+    }
+
+    const otherColor = card.colors?.find((c) => c !== currentColor);
+    if (otherColor) {
+      sounds.playCardSnap();
+      socket?.emit(EVENT_FLIP_WILDCARD, {
+        cardId: card.id,
+        toColor: otherColor,
+      });
+    }
+  };
+
+  const handleConfirmRainbowFlip = (toColor: PropertyColor) => {
+    if (!flipRainbowCard) return;
+    sounds.playCardSnap();
+    socket?.emit(EVENT_FLIP_WILDCARD, {
+      cardId: flipRainbowCard.id,
+      toColor,
+    });
+    setFlipRainbowCard(null);
   };
 
   const handleLeaveGame = () => {
@@ -168,11 +212,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
   // Calculate my current bank total
   const myBankTotal = myPlayer.bank.reduce((sum, c) => sum + (c.cashValue || 0), 0);
-
-  // Calculate my owned chips held
-  const myOwnedChipsCount = myPlayer.debtChips.filter(
-    (c) => c.ownerId === myPlayer.id && c.currentHolderId === myPlayer.id
-  ).length;
 
   // Complete property sets count
   const myCompleteSetsCount = myPlayer.properties.filter((s) => s.isComplete).length;
@@ -284,9 +323,33 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                         {opp.completeSetsCount}/3 • ${opp.bankTotal}M • {opp.handCount}c
                       </span>
                     </div>
-                    {/* Chips Indicator */}
-                    <div className="text-[10px] text-amber-300 font-mono font-bold">
-                      🪙 {opp.ownedChipsHeld}/3
+                    {/* Chips Indicator with 6-color Palette (Point 10) */}
+                    <div className="flex items-center gap-1">
+                      {opp.debtChips && opp.debtChips.length > 0 ? (
+                        opp.debtChips.map((chip) => {
+                          const owner =
+                            players.find((p) => p.id === chip.ownerId) ||
+                            (chip.ownerId === myPlayer.id ? myPlayer : null);
+                          const ownerColor = owner?.colorIndex ?? 0;
+                          const theme = getDebtChipTheme(ownerColor);
+                          const isOwn = chip.ownerId === opp.id;
+                          return (
+                            <span
+                              key={chip.id}
+                              title={
+                                isOwn
+                                  ? `${opp.displayName}'s Debt Chip (${theme.name})`
+                                  : `${owner?.displayName || 'Player'}'s Debt Chip (Held by ${opp.displayName})`
+                              }
+                              className={`px-1.5 py-0.5 rounded-full border text-[9px] font-bold shadow ${theme.gradient} ${theme.border} ${theme.text}`}
+                            >
+                              🪙 {isOwn ? 'Own' : owner?.displayName?.slice(0, 5)}
+                            </span>
+                          );
+                        })
+                      ) : (
+                        <span className="text-[10px] text-slate-500 font-mono">0 chips</span>
+                      )}
                     </div>
                   </div>
 
@@ -307,10 +370,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                       <div className="flex flex-wrap gap-2 pt-1">
                         {opp.properties.map((set, sIdx) => {
                           const meta = PROPERTY_CONFIG[set.color];
+                          const count = set.cards.length;
+                          const baseRent =
+                            meta?.rentValues?.[Math.min(count - 1, (meta?.rentValues?.length || 1) - 1)] || 1;
+                          const totalRent =
+                            baseRent + (set.shack ? 3 : 0) + (set.house ? 3 : 0) + (set.hotel ? 4 : 0);
+
                           return (
                             <div
                               key={sIdx}
-                              className="bg-[#081a12] border border-black/40 rounded-lg p-1.5 min-w-[90px] shadow"
+                              className="bg-[#081a12] border border-black/40 rounded-lg p-1.5 min-w-[95px] shadow"
                             >
                               <div
                                 className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex justify-between"
@@ -320,8 +389,16 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                                 }}
                               >
                                 <span className="truncate">{meta?.name}</span>
-                                <span>{set.cards.length}/{meta?.setSize}</span>
+                                <span>
+                                  {set.cards.length}/{meta?.setSize}
+                                </span>
                               </div>
+
+                              {/* Rent & Shack Display */}
+                              <div className="text-[8px] text-emerald-400 font-mono font-bold text-center mb-1 bg-black/40 rounded py-0.2">
+                                Rent: ${totalRent}M {set.shack ? '(Shack)' : ''}
+                              </div>
+
                               <div className="space-y-0.5">
                                 {set.cards.map((c) => (
                                   <div
@@ -344,16 +421,12 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           </div>
         </div>
 
-        {/* CENTER TABLE: DRAW DECK & DISCARD PILE (Screenshot 3) */}
+        {/* CENTER TABLE: DRAW DECK & DISCARD PILE (Point 3: manual clicking disabled) */}
         <div className="my-auto py-2 flex items-center justify-center gap-8">
-          {/* Draw Deck (Red Monopoly Card Back like in Screenshot 3) */}
+          {/* Draw Deck (Red Monopoly Card Back - Cards are drawn automatically) */}
           <div
-            onClick={isMyTurn ? handleDrawCards : undefined}
-            className={`flex flex-col items-center justify-between p-2.5 rounded-2xl border-2 transition-all w-28 h-40 shadow-2xl select-none ${
-              isMyTurn
-                ? 'border-amber-400 cursor-pointer hover:scale-105 ring-2 ring-amber-400/40 shadow-amber-500/20'
-                : 'border-slate-800 opacity-90'
-            } bg-gradient-to-b from-[#8b1e1e] to-[#5a1111] text-white`}
+            className="flex flex-col items-center justify-between p-2.5 rounded-2xl border-2 border-slate-700/80 w-28 h-40 shadow-2xl select-none bg-gradient-to-b from-[#8b1e1e] to-[#5a1111] text-white"
+            title="Cards are dealt automatically at the start of your turn (2 cards) or via action cards."
           >
             <div className="text-[9px] uppercase font-heading font-black tracking-widest text-amber-200">
               MONOPOLY
@@ -413,26 +486,38 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               </div>
             </div>
 
-            {/* Debt Chips Medallions (No Mercy) */}
+            {/* Debt Chips Medallions with 6-color Palette (Point 10) */}
             <div className="flex items-center gap-2 bg-[#0c2217] border border-[#1f4d36] px-3 py-1.5 rounded-2xl shadow-inner">
               <span className="text-slate-400 uppercase text-[10px] font-bold">Debt Chips:</span>
               <div className="flex items-center gap-1.5">
-                {[1, 2, 3].map((num) => {
-                  const isHeld = num <= myOwnedChipsCount;
+                {myPlayer.debtChips.map((chip) => {
+                  const owner =
+                    players.find((p) => p.id === chip.ownerId) ||
+                    (chip.ownerId === myPlayer.id ? myPlayer : null);
+                  const ownerColor = owner?.colorIndex ?? myPlayer.colorIndex;
+                  const theme = getDebtChipTheme(ownerColor);
+                  const isMyOwn = chip.ownerId === myPlayer.id;
+
                   return (
                     <div
-                      key={num}
-                      title={isHeld ? `Debt Chip ${num} (Held)` : `Debt Chip ${num} (Lost!)`}
-                      className={`w-7 h-7 rounded-full border flex items-center justify-center font-heading font-black text-[10px] shadow transition-all ${
-                        isHeld
-                          ? 'bg-gradient-to-br from-amber-300 via-amber-500 to-amber-700 border-amber-200 text-slate-950 shadow-amber-500/40 ring-1 ring-amber-400'
-                          : 'bg-black/50 border-dashed border-slate-700 text-slate-600 opacity-40'
-                      }`}
+                      key={chip.id}
+                      title={
+                        isMyOwn
+                          ? `Your Debt Chip (${theme.name})`
+                          : `${owner?.displayName || 'Opponent'}'s Debt Chip (Held by you)`
+                      }
+                      className={`px-2 py-0.5 rounded-full border flex items-center gap-1 font-heading font-bold text-[10px] shadow transition-all ${theme.gradient} ${theme.border} ${theme.text} ${theme.glow}`}
                     >
-                      {isHeld ? '🪙' : '✕'}
+                      <span>🪙</span>
+                      <span className="text-[9px] font-black uppercase">
+                        {isMyOwn ? 'Yours' : owner?.displayName}
+                      </span>
                     </div>
                   );
                 })}
+                {myPlayer.debtChips.length === 0 && (
+                  <span className="text-[10px] text-slate-500 italic">None held</span>
+                )}
               </div>
 
               {/* Settle Debt Button if chip is owed to an opponent */}
@@ -450,7 +535,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             {/* Turn & Play Counter with Large Golden END TURN Button (Screenshot 3) */}
             <div className="flex items-center gap-3">
               <div className="text-right">
-                <div className={`text-xs font-bold font-heading uppercase ${isMyTurn ? 'text-amber-400' : 'text-slate-400'}`}>
+                <div
+                  className={`text-xs font-bold font-heading uppercase ${
+                    isMyTurn ? 'text-amber-400' : 'text-slate-400'
+                  }`}
+                >
                   {isMyTurn ? 'Your Turn' : `${activePlayerPublic?.displayName}'s Turn`}
                 </div>
                 <div className="text-[10px] text-slate-400 font-mono">
@@ -482,12 +571,13 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
                 <div className="h-28 bg-[#0b2318] border border-dashed border-[#1f4d36] rounded-2xl p-2 flex items-center gap-2 overflow-x-auto shadow-inner">
                   {myPlayer.bank.length === 0 ? (
-                    <div className="text-xs text-slate-500 italic mx-auto">
-                      empty
-                    </div>
+                    <div className="text-xs text-slate-500 italic mx-auto">empty</div>
                   ) : (
                     myPlayer.bank.map((card) => (
-                      <div key={card.id} className="flex-shrink-0 scale-90 -mr-14 hover:mr-0 transition-all hover:scale-100 z-10 hover:z-30">
+                      <div
+                        key={card.id}
+                        className="flex-shrink-0 scale-90 -mr-14 hover:mr-0 transition-all hover:scale-100 z-10 hover:z-30"
+                      >
                         <CardView card={card} size="sm" />
                       </div>
                     ))
@@ -495,7 +585,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 </div>
               </div>
 
-              {/* Property Sets on Table */}
+              {/* Property Sets on Table (Point 4: Shack rent & Point 5/9: Wildcard Flip buttons) */}
               <div>
                 <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">
                   YOUR SETS • {myCompleteSetsCount} COMPLETE
@@ -506,38 +596,90 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     no sets played yet
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-1">
+                  <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
                     {myPlayer.properties.map((set, idx) => {
                       const meta = PROPERTY_CONFIG[set.color];
+                      const count = set.cards.length;
+                      const baseRent =
+                        meta?.rentValues?.[Math.min(count - 1, (meta?.rentValues?.length || 1) - 1)] || 1;
+                      const shackBonus = set.shack ? 3 : 0;
+                      const houseBonus = set.house ? 3 : 0;
+                      const hotelBonus = set.hotel ? 4 : 0;
+                      const totalRent = baseRent + shackBonus + houseBonus + hotelBonus;
+
                       return (
                         <div
                           key={idx}
-                          className="bg-[#0b2318] border border-slate-700/80 rounded-xl p-2 min-w-[110px] shadow"
+                          className="bg-[#0b2318] border border-slate-700/80 rounded-xl p-2 min-w-[130px] shadow flex flex-col justify-between"
                         >
-                          <div
-                            className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex items-center justify-between"
-                            style={{
-                              backgroundColor: meta?.hexColor,
-                              color: meta?.textColor,
-                            }}
-                          >
-                            <span className="truncate">{meta?.name}</span>
-                            <span>{set.cards.length}/{meta?.setSize}</span>
-                          </div>
+                          <div>
+                            {/* Color Bar */}
+                            <div
+                              className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex items-center justify-between"
+                              style={{
+                                backgroundColor: meta?.hexColor,
+                                color: meta?.textColor,
+                              }}
+                            >
+                              <span className="truncate">{meta?.name}</span>
+                              <span>
+                                {set.cards.length}/{meta?.setSize}
+                              </span>
+                            </div>
 
-                          <div className="space-y-0.5">
-                            {set.cards.map((c) => (
-                              <div
-                                key={c.id}
-                                className="text-[9px] text-slate-200 truncate bg-black/40 px-1 py-0.2 rounded"
-                              >
-                                {c.name}
-                              </div>
-                            ))}
+                            {/* Point 4: Exact Rent Calculation Formula Display */}
+                            <div className="text-[9px] text-emerald-300 font-mono font-bold bg-black/50 px-1 py-0.5 rounded mb-1 text-center border border-emerald-500/20">
+                              Rent: ${baseRent}M {set.shack ? '+ $3M (Shack)' : ''} = ${totalRent}M
+                            </div>
+
+                            {/* Shack and Building Badges */}
+                            <div className="flex flex-wrap gap-1 mb-1.5">
+                              {set.shack && (
+                                <span className="text-[8px] font-bold bg-amber-500/25 text-amber-300 border border-amber-400/50 px-1 py-0.2 rounded shadow-sm">
+                                  🛖 Shack (+ $3M)
+                                </span>
+                              )}
+                              {set.house && (
+                                <span className="text-[8px] font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-400/50 px-1 py-0.2 rounded shadow-sm">
+                                  🏠 House (+ $3M)
+                                </span>
+                              )}
+                              {set.hotel && (
+                                <span className="text-[8px] font-bold bg-rose-500/25 text-rose-300 border border-rose-400/50 px-1 py-0.2 rounded shadow-sm">
+                                  🏨 Hotel (+ $4M)
+                                </span>
+                              )}
+                            </div>
+
+                            {/* Cards in this set */}
+                            <div className="space-y-1">
+                              {set.cards.map((c) => {
+                                const isWild = c.type === CardType.PROPERTY_WILDCARD;
+                                return (
+                                  <div
+                                    key={c.id}
+                                    className="text-[9px] text-slate-200 bg-black/40 px-1.5 py-1 rounded flex items-center justify-between gap-1"
+                                  >
+                                    <span className="truncate">{c.name}</span>
+                                    {/* Point 5 & 9: Flip Wildcard Button (Costs 1 Play) */}
+                                    {isWild && isMyTurn && (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleFlipWildcardInSet(c, set.color)}
+                                        className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-400 hover:text-slate-950 text-amber-200 border border-amber-400/60 rounded text-[8px] font-bold tracking-tight active:scale-95 transition-all shadow"
+                                        title="Flip wildcard (Costs 1 Play)"
+                                      >
+                                        🔄 Flip (1 Play)
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
                           </div>
 
                           {set.isComplete && (
-                            <div className="mt-1 text-[8px] text-emerald-300 font-heading font-black bg-emerald-950/80 border border-emerald-500/40 py-0.2 rounded text-center uppercase tracking-wider">
+                            <div className="mt-1.5 text-[8px] text-emerald-300 font-heading font-black bg-emerald-950/80 border border-emerald-500/40 py-0.5 rounded text-center uppercase tracking-wider">
                               ✓ COMPLETE
                             </div>
                           )}
@@ -605,21 +747,91 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       )}
 
       {/* ─────────────────────────────────────────────────────────────────── */}
-      {/* 6. PAYMENT / JUST SAY NO REACTION MODAL (Screenshot 2)              */}
+      {/* 6. REAL-TIME ACTION REACTION & REPOSSESS MODALS (Points 1, 6, 7)     */}
       {/* ─────────────────────────────────────────────────────────────────── */}
-      {reactionModalData && (
-        <ActionReactionModal
-          attackerName={reactionModalData.attackerName}
-          demandDescription={reactionModalData.demandDescription}
-          amountDue={reactionModalData.amountDue}
+      {gameState.pendingAction && gameState.pendingAction.currentAwaitingPlayerId === myPlayer.id && (
+        <>
+          {(gameState.pendingAction.status === 'AWAITING_JSN' ||
+            gameState.pendingAction.status === 'AWAITING_PAYMENT') && (
+            <ActionReactionModal
+              attackerName={gameState.pendingAction.attackerName || 'Opponent'}
+              cardName={gameState.pendingAction.card.name}
+              demandDescription={gameState.pendingAction.demandDescription || ''}
+              amountDue={gameState.pendingAction.amountDue || gameState.pendingAction.rentAmount || 0}
+              status={gameState.pendingAction.status}
+              myPlayer={myPlayer}
+              hasJustSayNo={hasJustSayNo}
+              onPayCards={(selectedCardIds, surrenderDebtChip) => {
+                sounds.playBankCoin();
+                socket?.emit(EVENT_SUBMIT_PAYMENT, {
+                  cardIds: selectedCardIds,
+                  surrenderDebtChip,
+                });
+              }}
+              onJustSayNo={() => {
+                sounds.playJustSayNo();
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, { playJustSayNo: true });
+              }}
+              onAcceptAction={() => {
+                sounds.playCardSnap();
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, { playJustSayNo: false });
+              }}
+            />
+          )}
+
+          {gameState.pendingAction.status === 'AWAITING_REPOSSESS' && (
+            <RepossessModal
+              attackerName={gameState.pendingAction.attackerName || 'Opponent'}
+              myPlayer={myPlayer}
+              otherPlayers={opponents}
+              hasJustSayNo={hasJustSayNo}
+              onJustSayNo={() => {
+                sounds.playJustSayNo();
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, { playJustSayNo: true });
+              }}
+              onConfirmRepossess={(keepCardId, distributions) => {
+                sounds.playActionAttack();
+                socket?.emit(EVENT_SUBMIT_REPOSSESS, {
+                  keepCardId,
+                  distributions,
+                });
+              }}
+            />
+          )}
+        </>
+      )}
+
+      {/* Floating Status Notification when another player is reacting */}
+      {gameState.pendingAction && gameState.pendingAction.currentAwaitingPlayerId !== myPlayer.id && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-40 bg-[#0a1f15]/95 border-2 border-amber-500/80 px-6 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 backdrop-blur-md animate-pulse">
+          <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
+          <span className="font-heading text-xs font-bold uppercase tracking-wider text-amber-300">
+            Waiting for {players.find((p) => p.id === gameState.pendingAction!.currentAwaitingPlayerId)?.displayName || 'Opponent'} to respond to {gameState.pendingAction.card.name}...
+          </span>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 6B. HAND LIMIT DISCARD MODAL (Point 2)                             */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {showHandLimitModal && (
+        <HandLimitDiscardModal
+          excessCount={myHand.length - 7}
+          hand={myHand}
+          onConfirmDiscard={handleConfirmHandLimitDiscard}
+          onCancel={() => setShowHandLimitModal(false)}
+        />
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 6C. RAINBOW WILDCARD FLIP MODAL (Point 5 & 9)                       */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {flipRainbowCard && (
+        <WildcardSelectModal
+          card={flipRainbowCard}
           myPlayer={myPlayer}
-          hasJustSayNo={hasJustSayNo}
-          onPayCards={() => setReactionModalData(null)}
-          onJustSayNo={() => {
-            sounds.playJustSayNo();
-            setReactionModalData(null);
-          }}
-          onSurrenderDebtChip={() => setReactionModalData(null)}
+          onSelectColor={handleConfirmRainbowFlip}
+          onCancel={() => setFlipRainbowCard(null)}
         />
       )}
 

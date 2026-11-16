@@ -123,15 +123,14 @@ export const ActionIcon: React.FC<{ type: ActionType; className?: string }> = ({
         </svg>
       );
 
+    case ActionType.FORCED_DEBT:
     case ActionType.DEBT_COLLECTOR:
       return (
         <svg viewBox="0 0 64 64" className={className} fill="none">
-          <circle cx="32" cy="32" r="28" fill="#15803d" fillOpacity="0.2" stroke="#22c55e" strokeWidth="2.5" />
-          {/* Top Hat & Money Bag */}
-          <ellipse cx="32" cy="22" rx="14" ry="3" fill="#334155" />
-          <rect x="22" y="12" width="20" height="10" rx="1" fill="#1e293b" />
-          <path d="M 22 34 C 20 48 44 48 42 34 C 40 30 24 30 22 34 Z" fill="#4ade80" />
-          <text x="32" y="42" fontFamily="Oswald, sans-serif" fontSize="12" fontWeight="900" textAnchor="middle" fill="#052e16">$5M</text>
+          <circle cx="32" cy="32" r="28" fill="#eab308" fillOpacity="0.2" stroke="#eab308" strokeWidth="2.5" />
+          {/* Forced Debt token emblem */}
+          <circle cx="32" cy="32" r="16" fill="#f59e0b" stroke="#fbbf24" strokeWidth="2" />
+          <text x="32" y="38" fontFamily="Oswald, sans-serif" fontSize="16" fontWeight="900" textAnchor="middle" fill="#78350f">🪙</text>
         </svg>
       );
 
