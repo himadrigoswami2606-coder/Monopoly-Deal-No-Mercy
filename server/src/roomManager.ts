@@ -31,6 +31,7 @@ import {
   EVENT_ADD_BOT,
   EVENT_REMOVE_BOT,
   EVENT_FLIP_WILDCARD,
+  EVENT_SETTLE_DEBT,
   PropertyColor,
 } from '../../shared/types';
 import { GameEngine } from './gameEngine';
@@ -93,7 +94,241 @@ function broadcastGameState(io: SocketIOServer, room: Room): void {
 }
 
 /**
- * Automated AI Bot turn execution
+ * Decision helper: finds the best card & target options for the bot to play.
+ * Follows all official Monopoly Deal No Mercy mechanics & winning strategies.
+ */
+function chooseBotCardPlay(room: Room, bot: Player): {
+  cardId: string;
+  options?: {
+    targetPlayerId?: string;
+    targetColor?: PropertyColor;
+    targetCardId?: string;
+    myCardId?: string;
+    chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
+    asBank?: boolean;
+  };
+} | null {
+  const opponents = room.players.filter((p) => p.id !== bot.id);
+  const hand = bot.hand;
+  if (hand.length === 0) return null;
+
+  // 1. Super Sly Deal: Steal an entire complete set from an opponent!
+  const superSlyCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.SUPER_SLY_DEAL
+  );
+  if (superSlyCard) {
+    for (const opp of opponents) {
+      const completeSet = opp.properties.find((s) => s.isComplete);
+      if (completeSet) {
+        return {
+          cardId: superSlyCard.id,
+          options: {
+            targetPlayerId: opp.id,
+            targetColor: completeSet.color,
+          },
+        };
+      }
+    }
+  }
+
+  // 2. Pass Go: Draw 2 cards immediately to expand options
+  const passGoCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.PASS_GO
+  );
+  if (passGoCard) {
+    return { cardId: passGoCard.id };
+  }
+
+  // 3. Complete an in-progress set using a property or wildcard
+  for (const set of bot.properties) {
+    if (!set.isComplete) {
+      const config = PROPERTY_CONFIG[set.color];
+      const needed = config ? config.setSize - set.cards.length : 1;
+      if (needed === 1) {
+        const matchProp = hand.find(
+          (c) => c.type === CardType.PROPERTY && c.color === set.color
+        );
+        if (matchProp) {
+          return { cardId: matchProp.id };
+        }
+        const matchWild = hand.find(
+          (c) =>
+            c.type === CardType.PROPERTY_WILDCARD &&
+            (c.isRainbow || c.colors?.includes(set.color))
+        );
+        if (matchWild) {
+          return { cardId: matchWild.id, options: { targetColor: set.color } };
+        }
+      }
+    }
+  }
+
+  // 4. Sly Deal: Steal 1 property card from an opponent's incomplete set
+  const slyDealCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.SLY_DEAL
+  );
+  if (slyDealCard) {
+    for (const opp of opponents) {
+      for (const set of opp.properties) {
+        if (!set.isComplete && set.cards.length > 0) {
+          // Prioritize cards matching bot's incomplete sets
+          const matchingBotCard = set.cards.find((c) =>
+            bot.properties.some((bs) => bs.color === set.color && !bs.isComplete)
+          );
+          const targetCard = matchingBotCard || set.cards[0];
+          if (targetCard) {
+            return {
+              cardId: slyDealCard.id,
+              options: {
+                targetPlayerId: opp.id,
+                targetCardId: targetCard.id,
+              },
+            };
+          }
+        }
+      }
+    }
+  }
+
+  // 5. Yoink: Steal up to $10M from the wealthiest opponent's bank
+  const yoinkCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.YOINK
+  );
+  if (yoinkCard) {
+    const sortedOpponents = [...opponents].sort(
+      (a, b) =>
+        b.bank.reduce((sum, c) => sum + c.cashValue, 0) -
+        a.bank.reduce((sum, c) => sum + c.cashValue, 0)
+    );
+    const richestOpp = sortedOpponents[0];
+    if (richestOpp && richestOpp.bank.length > 0) {
+      return {
+        cardId: yoinkCard.id,
+        options: { targetPlayerId: richestOpp.id },
+      };
+    }
+  }
+
+  // 6. Debt Collector: Demand $5M from opponent
+  const debtCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.DEBT_COLLECTOR
+  );
+  if (debtCard) {
+    const oppWithFunds = opponents.find((o) => o.bank.length > 0) || opponents[0];
+    if (oppWithFunds) {
+      return {
+        cardId: debtCard.id,
+        options: { targetPlayerId: oppWithFunds.id },
+      };
+    }
+  }
+
+  // 7. Rent & Wild Rent: Charge rent on any set owned by bot
+  const rentCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.RENT
+  );
+  if (rentCard) {
+    for (const set of bot.properties) {
+      if (set.cards.length > 0) {
+        if (rentCard.isWildRent) {
+          const richestOpp = opponents[0];
+          if (richestOpp) {
+            return {
+              cardId: rentCard.id,
+              options: {
+                targetColor: set.color,
+                targetPlayerId: richestOpp.id,
+              },
+            };
+          }
+        } else if (
+          !rentCard.rentColors ||
+          rentCard.rentColors.includes(set.color)
+        ) {
+          return {
+            cardId: rentCard.id,
+            options: { targetColor: set.color },
+          };
+        }
+      }
+    }
+  }
+
+  // 8. House / Hotel on complete color sets
+  const houseCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.HOUSE
+  );
+  if (houseCard) {
+    const eligibleSet = bot.properties.find(
+      (s) =>
+        s.isComplete &&
+        !s.house &&
+        s.color !== PropertyColor.RAILROAD &&
+        s.color !== PropertyColor.UTILITY
+    );
+    if (eligibleSet) {
+      return { cardId: houseCard.id, options: { targetColor: eligibleSet.color } };
+    }
+  }
+
+  const hotelCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.HOTEL
+  );
+  if (hotelCard) {
+    const eligibleSet = bot.properties.find(
+      (s) =>
+        s.isComplete &&
+        s.house &&
+        !s.hotel &&
+        s.color !== PropertyColor.RAILROAD &&
+        s.color !== PropertyColor.UTILITY
+    );
+    if (eligibleSet) {
+      return { cardId: hotelCard.id, options: { targetColor: eligibleSet.color } };
+    }
+  }
+
+  // 9. Play standard property cards into sets
+  const propCard = hand.find((c) => c.type === CardType.PROPERTY);
+  if (propCard) {
+    return { cardId: propCard.id };
+  }
+
+  // 10. Play property wildcard
+  const wildCard = hand.find((c) => c.type === CardType.PROPERTY_WILDCARD);
+  if (wildCard) {
+    const chosenColor = wildCard.colors?.[0] || PropertyColor.DARK_BLUE;
+    return { cardId: wildCard.id, options: { targetColor: chosenColor } };
+  }
+
+  // 11. Birthday card: collect $2M from everyone
+  const bdayCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.ITS_MY_BIRTHDAY
+  );
+  if (bdayCard) {
+    return { cardId: bdayCard.id };
+  }
+
+  // 12. Money cards deposited into bank
+  const moneyCard = hand.find((c) => c.type === CardType.MONEY);
+  if (moneyCard) {
+    return { cardId: moneyCard.id, options: { asBank: true } };
+  }
+
+  // 13. Bank excess action cards (except Just Say No) to grow cash towards victory
+  const anyAction = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType !== ActionType.JUST_SAY_NO
+  );
+  if (anyAction) {
+    return { cardId: anyAction.id, options: { asBank: true } };
+  }
+
+  return null;
+}
+
+/**
+ * Automated AI Bot turn execution with full rule knowledge, debt settlement,
+ * and realistic staggered plays.
  */
 function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
   if (!room.gameState || room.gameState.isGameOver) return;
@@ -104,38 +339,53 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
   setTimeout(() => {
     if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer.id) return;
 
-    // AI Bot plays up to 2-3 cards
-    let playsCount = 0;
-    const handCopy = [...activePlayer.hand];
-
-    for (const card of handCopy) {
-      if (playsCount >= 2) break;
-
-      if (card.type === CardType.PROPERTY) {
-        GameEngine.playCard(room, activePlayer.id, card.id);
-        playsCount++;
-      } else if (card.type === CardType.MONEY) {
-        GameEngine.playCard(room, activePlayer.id, card.id);
-        playsCount++;
-      } else if (card.type === CardType.ACTION && card.actionType === ActionType.PASS_GO) {
-        GameEngine.playCard(room, activePlayer.id, card.id);
-        playsCount++;
-      } else if (card.type === CardType.ACTION && card.actionType === ActionType.ITS_MY_BIRTHDAY) {
-        GameEngine.playCard(room, activePlayer.id, card.id);
-        playsCount++;
-      }
+    // STEP 1: SETTLING DEBT (Rule from Geeky Hobbies / No Mercy rules)
+    // "At the start of your turn if another player has one of your debt chips, you must try to settle the debt."
+    const creditor = room.players.find(
+      (p) => p.id !== activePlayer.id && p.debtChips.some((chip) => chip.ownerId === activePlayer.id)
+    );
+    if (creditor && activePlayer.hand.length > 0) {
+      // Pick lowest value card to surrender for debt settlement
+      const cardToGive = [...activePlayer.hand].sort((a, b) => a.cashValue - b.cashValue)[0];
+      GameEngine.settleDebt(room, activePlayer.id, cardToGive.id, creditor.id);
+      broadcastGameState(io, room);
     }
 
-    // End Bot turn after a brief delay
-    setTimeout(() => {
-      if (room.gameState && !room.gameState.isGameOver && room.gameState.activePlayerId === activePlayer.id) {
-        GameEngine.endTurn(room, activePlayer.id);
-        broadcastGameState(io, room);
-      }
-    }, 1000);
+    // STEP 2: STAGGERED PLAYS (Up to 3 plays per turn)
+    let currentPlayIndex = 0;
 
-    broadcastGameState(io, room);
-  }, 1200);
+    function executeNextPlay() {
+      if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer!.id) return;
+
+      if (
+        room.gameState.playsUsedThisTurn < room.gameState.maxPlaysPerTurn &&
+        activePlayer!.hand.length > 0 &&
+        currentPlayIndex < 3
+      ) {
+        const playDecision = chooseBotCardPlay(room, activePlayer!);
+        if (playDecision) {
+          GameEngine.playCard(room, activePlayer!.id, playDecision.cardId, playDecision.options);
+          currentPlayIndex++;
+          broadcastGameState(io, room);
+
+          if (!room.gameState.isGameOver && room.gameState.playsUsedThisTurn < room.gameState.maxPlaysPerTurn) {
+            setTimeout(executeNextPlay, 900);
+            return;
+          }
+        }
+      }
+
+      // STEP 3: END BOT TURN AFTER PLAYS ARE COMPLETE
+      setTimeout(() => {
+        if (room.gameState && !room.gameState.isGameOver && room.gameState.activePlayerId === activePlayer!.id) {
+          GameEngine.endTurn(room, activePlayer!.id);
+          broadcastGameState(io, room);
+        }
+      }, 700);
+    }
+
+    executeNextPlay();
+  }, 1000);
 }
 
 /**
@@ -465,6 +715,26 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
 
       broadcastGameState(io, room);
     }
+  });
+
+  // -------------------------------------------------------------------------
+  // 8B. SETTLE DEBT CHIP (Official No Mercy Rule)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_SETTLE_DEBT, (data: { cardId: string; creditorId: string }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
+
+    const result = GameEngine.settleDebt(room, playerId, data.cardId, data.creditorId);
+    if (!result.success) {
+      socket.emit(EVENT_ERROR, { message: result.error || 'Cannot settle debt' });
+      return;
+    }
+
+    broadcastGameState(io, room);
   });
 
   // -------------------------------------------------------------------------

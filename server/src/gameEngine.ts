@@ -235,6 +235,36 @@ export class GameEngine {
 
       const targetOpponent = room.players.find((p) => p.id === options?.targetPlayerId);
 
+      // AI Bot counter: If target is a Bot and has Just Say No in hand, it automatically counters harmful action!
+      if (
+        targetOpponent?.isBot &&
+        [
+          ActionType.SLY_DEAL,
+          ActionType.SUPER_SLY_DEAL,
+          ActionType.FORCED_DEAL,
+          ActionType.DEBT_COLLECTOR,
+          ActionType.YOINK,
+          ActionType.REPOSSESS,
+          ActionType.TOUGH_LUCK,
+        ].includes(card.actionType!)
+      ) {
+        const jsnIdx = targetOpponent.hand.findIndex(
+          (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+        );
+        if (jsnIdx !== -1) {
+          const [jsnCard] = targetOpponent.hand.splice(jsnIdx, 1);
+          room.gameState.discardPile.unshift(jsnCard);
+          GameEngine.addLog(
+            room,
+            targetOpponent.id,
+            'JUST_SAY_NO_COUNTER',
+            `🛑 ${targetOpponent.displayName} played JUST SAY NO to block ${player.displayName}'s ${card.name}!`
+          );
+          room.gameState.playsUsedThisTurn++;
+          return { success: true };
+        }
+      }
+
       switch (card.actionType) {
         case ActionType.PASS_GO: {
           GameEngine.drawCards(room, playerId, 2);
@@ -554,6 +584,82 @@ export class GameEngine {
   }
 
   /**
+   * Settles a Debt Chip owed to an opponent according to official No Mercy rules:
+   * At the start of a turn, debtor gives 1 card from hand to the creditor holding their chip.
+   * Creditor receives and places it immediately. The debtor receives their Debt Chip back.
+   * Settling debt does NOT count toward the 3 plays limit for the turn.
+   */
+  static settleDebt(
+    room: Room,
+    debtorId: string,
+    cardId: string,
+    creditorId: string
+  ): { success: boolean; error?: string } {
+    if (!room.gameState || room.gameState.isGameOver) {
+      return { success: false, error: 'Game is not active' };
+    }
+    const debtor = room.players.find((p) => p.id === debtorId);
+    const creditor = room.players.find((p) => p.id === creditorId);
+    if (!debtor || !creditor) {
+      return { success: false, error: 'Player not found' };
+    }
+
+    // Find if creditor holds one of debtor's chips
+    const chipIndex = creditor.debtChips.findIndex((c) => c.ownerId === debtorId);
+    if (chipIndex === -1) {
+      return { success: false, error: 'Creditor does not hold any of your Debt Chips' };
+    }
+
+    const cardIndex = debtor.hand.findIndex((c) => c.id === cardId);
+    if (cardIndex === -1) {
+      return { success: false, error: 'Card not in hand' };
+    }
+
+    const [card] = debtor.hand.splice(cardIndex, 1);
+    const [chip] = creditor.debtChips.splice(chipIndex, 1);
+
+    // Return chip to debtor
+    chip.currentHolderId = debtorId;
+    debtor.debtChips.push(chip);
+
+    // Creditor places card immediately
+    if (card.type === CardType.PROPERTY) {
+      const color = card.color!;
+      let set = creditor.properties.find((s) => s.color === color);
+      if (!set) {
+        set = { color, cards: [], house: false, hotel: false, isComplete: false };
+        creditor.properties.push(set);
+      }
+      set.cards.push(card);
+      set.isComplete = set.cards.length >= (PROPERTY_CONFIG[color]?.setSize || 3);
+    } else if (card.type === CardType.PROPERTY_WILDCARD) {
+      const color = card.colors?.[0] || PropertyColor.DARK_BLUE;
+      let set = creditor.properties.find((s) => s.color === color);
+      if (!set) {
+        set = { color, cards: [], house: false, hotel: false, isComplete: false };
+        creditor.properties.push(set);
+      }
+      set.cards.push(card);
+      set.isComplete = set.cards.length >= (PROPERTY_CONFIG[color]?.setSize || 3);
+    } else {
+      // Money or Action card deposited directly into bank
+      creditor.bank.push(card);
+    }
+
+    GameEngine.addLog(
+      room,
+      debtorId,
+      'SETTLE_DEBT',
+      `🤝 ${debtor.displayName} settled their debt with ${creditor.displayName} by surrendering ${card.name} and RECLAIMED their Debt Chip!`
+    );
+
+    GameEngine.checkAndBroadcastWin(room, debtor);
+    GameEngine.checkAndBroadcastWin(room, creditor);
+
+    return { success: true };
+  }
+
+  /**
    * Helper to check win condition and declare victory.
    */
   private static checkAndBroadcastWin(room: Room, player: Player): void {
@@ -590,6 +696,21 @@ export class GameEngine {
     const nextPlayer = room.players[nextIndex];
 
     const currentPlr = room.players[currentIndex];
+
+    // Enforce 7-card hand limit at end of turn (official Monopoly Deal rules)
+    if (currentPlr.hand.length > 7) {
+      const excessCount = currentPlr.hand.length - 7;
+      // Discard lowest priority excess cards
+      const discarded = currentPlr.hand.splice(7, excessCount);
+      room.gameState.discardPile.unshift(...discarded);
+      GameEngine.addLog(
+        room,
+        playerId,
+        'DISCARD_EXCESS',
+        `🗑️ ${currentPlr.displayName} discarded ${excessCount} excess card${excessCount > 1 ? 's' : ''} to meet the 7-card hand limit.`
+      );
+    }
+
     GameEngine.addLog(
       room,
       playerId,

@@ -14,12 +14,14 @@ import {
   EVENT_END_TURN,
   EVENT_DRAW_CARDS,
   EVENT_LEAVE_ROOM,
+  EVENT_SETTLE_DEBT,
 } from '../../../shared/types';
 import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
 import { ActionTargetModal } from './ActionTargetModal';
 import { ActionReactionModal } from './ActionReactionModal';
 import { WildcardSelectModal } from './WildcardSelectModal';
+import { RulesHelpModal } from './RulesHelpModal';
 import { PLAYER_COLORS } from './PlayerCard';
 import { sounds } from '../utils/audio';
 
@@ -47,6 +49,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     amountDue: number;
   } | null>(null);
   const [showLogDrawer, setShowLogDrawer] = useState(false);
+  const [showRulesModal, setShowRulesModal] = useState(false);
 
   const isMyTurn = gameState.activePlayerId === myPlayer.id;
   const activePlayerPublic = players.find((p) => p.id === gameState.activePlayerId);
@@ -158,6 +161,25 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   // Complete property sets count
   const myCompleteSetsCount = myPlayer.properties.filter((s) => s.isComplete).length;
 
+  // Creditor who holds one of my debt chips (if any)
+  const chipCreditor = opponents.find((opp) =>
+    opp.debtChips?.some((c) => c.ownerId === myPlayer.id)
+  );
+
+  const [showSettleModal, setShowSettleModal] = useState(false);
+  const [selectedSettleCardId, setSelectedSettleCardId] = useState<string | null>(null);
+
+  const handleConfirmSettle = () => {
+    if (!chipCreditor || !selectedSettleCardId) return;
+    sounds.playBankCoin();
+    socket?.emit(EVENT_SETTLE_DEBT, {
+      cardId: selectedSettleCardId,
+      creditorId: chipCreditor.id,
+    });
+    setShowSettleModal(false);
+    setSelectedSettleCardId(null);
+  };
+
   return (
     <div className="min-h-screen felt-tabletop flex flex-col justify-between text-slate-100 overflow-x-hidden font-sans">
       {/* ─────────────────────────────────────────────────────────────────── */}
@@ -181,7 +203,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2 sm:gap-3">
+          {/* Rules & Help Button */}
+          <button
+            onClick={() => setShowRulesModal(true)}
+            className="p-1 px-2.5 rounded-lg bg-[#133324] border border-amber-500/40 hover:border-amber-400 text-amber-300 text-xs font-semibold flex items-center gap-1.5 shadow transition-all hover:bg-[#1a402e]"
+            title="Monopoly Deal No Mercy Rules & Card Guide"
+          >
+            <span className="text-sm">❓</span>
+            <span className="hidden sm:inline">Rules & Cards</span>
+          </button>
+
           {/* Action Log Drawer Toggle */}
           <button
             onClick={() => setShowLogDrawer(!showLogDrawer)}
@@ -386,6 +418,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                   );
                 })}
               </div>
+
+              {/* Settle Debt Button if chip is owed to an opponent */}
+              {isMyTurn && chipCreditor && myHand.length > 0 && (
+                <button
+                  onClick={() => setShowSettleModal(true)}
+                  className="ml-2 flex items-center gap-1 px-2.5 py-1 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400 text-amber-300 rounded-xl text-[10px] font-bold animate-pulse transition-all shadow"
+                  title={`Give 1 card to ${chipCreditor.displayName} to reclaim your chip`}
+                >
+                  <span>Reclaim Chip</span>
+                </button>
+              )}
             </div>
 
             {/* Turn & Play Counter with Large Golden END TURN Button (Screenshot 3) */}
@@ -613,6 +656,81 @@ export const GameBoard: React.FC<GameBoardProps> = ({
             Close Log
           </button>
         </aside>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 8. RULES & CARDS HELP MODAL                                         */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {showRulesModal && (
+        <RulesHelpModal onClose={() => setShowRulesModal(false)} />
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 9. SETTLE DEBT MODAL (Official No Mercy Rule)                       */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {showSettleModal && chipCreditor && (
+        <div className="fixed inset-0 bg-black/80 backdrop-blur-sm z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-[#0e2a1e] border-2 border-amber-500/60 rounded-3xl max-w-lg w-full p-6 text-slate-100 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f4d36]">
+              <h3 className="font-heading font-black text-base uppercase text-amber-400 flex items-center gap-2">
+                <span>🪙 Settle Debt with {chipCreditor.displayName}</span>
+              </h3>
+              <button
+                onClick={() => setShowSettleModal(false)}
+                className="text-slate-400 hover:text-white font-bold text-sm"
+              >
+                ✕
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-300 leading-relaxed">
+              According to Monopoly Deal: No Mercy rules, at the start of your turn you can settle your debt. Choose <strong>1 card from your hand</strong> to give to <strong>{chipCreditor.displayName}</strong>. They will play it immediately and return your Debt Chip!
+            </p>
+
+            <div className="space-y-1.5 max-h-60 overflow-y-auto pr-1">
+              {myHand.map((card) => {
+                const isSelected = selectedSettleCardId === card.id;
+                return (
+                  <div
+                    key={card.id}
+                    onClick={() => setSelectedSettleCardId(card.id)}
+                    className={`p-2.5 rounded-xl border flex items-center justify-between cursor-pointer transition-all ${
+                      isSelected
+                        ? 'bg-amber-400/20 border-amber-400 text-amber-200 ring-2 ring-amber-400/50 shadow'
+                        : 'bg-[#081a12] border-[#1b3d2b] text-slate-300 hover:bg-[#133324]'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs">{card.name}</span>
+                      <span className="text-[10px] text-slate-400 uppercase font-mono">
+                        ({card.type})
+                      </span>
+                    </div>
+                    <span className="font-mono font-bold text-emerald-400 text-xs">
+                      ${card.cashValue}M
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+
+            <div className="pt-3 border-t border-[#1f4d36] flex justify-end gap-3">
+              <button
+                onClick={() => setShowSettleModal(false)}
+                className="px-4 py-2 rounded-xl text-xs font-bold text-slate-400 hover:text-white"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={!selectedSettleCardId}
+                onClick={handleConfirmSettle}
+                className="px-5 py-2 rounded-xl font-heading font-bold text-xs uppercase bg-amber-400 hover:bg-amber-300 text-slate-950 disabled:opacity-50 disabled:cursor-not-allowed shadow transition-all"
+              >
+                Surrender Card & Reclaim Chip
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

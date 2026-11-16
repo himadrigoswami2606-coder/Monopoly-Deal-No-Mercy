@@ -316,6 +316,7 @@ export const EVENT_SEND_EMOTE       = 'send-emote'       as const;
 export const EVENT_ADD_BOT          = 'add-bot'          as const;
 export const EVENT_REMOVE_BOT       = 'remove-bot'       as const;
 export const EVENT_FLIP_WILDCARD    = 'flip-wildcard'    as const;
+export const EVENT_SETTLE_DEBT      = 'settle-debt'      as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
 export const EVENT_ROOM_JOINED      = 'room-joined'      as const;
@@ -349,6 +350,7 @@ export interface ClientToServerEvents {
   [EVENT_ADD_BOT]: () => void;
   [EVENT_REMOVE_BOT]: (data: { botId: string }) => void;
   [EVENT_FLIP_WILDCARD]: (data: { cardId: string; toColor: PropertyColor }) => void;
+  [EVENT_SETTLE_DEBT]: (data: { cardId: string; creditorId: string }) => void;
 }
 
 export interface ServerToClientEvents {
