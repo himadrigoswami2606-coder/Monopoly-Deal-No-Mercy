@@ -149,36 +149,44 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const handleInitiatePlay = (card: Card) => {
     if (!isMyTurn || pendingSettlement || gameState.pendingAction) return;
 
-    // 1. Dual-color wildcard modal (Screenshot 1)
-    if (card.type === CardType.PROPERTY_WILDCARD && !card.isRainbow) {
+    // 1. Property wildcards (Dual-color or Rainbow)
+    if (card.type === CardType.PROPERTY_WILDCARD) {
+      if (card.isRainbow) {
+        const ownedSets = myPlayer.properties.filter((s) => s.cards.length > 0);
+        if (ownedSets.length === 0) {
+          alert(
+            'You cannot start a new color with a Rainbow Wildcard! According to Monopoly Deal: No Mercy rules, it can only be added to a property color you already own on the table. You can bank it as cash ($0M) or hold it in your hand.'
+          );
+          return;
+        }
+      }
       setWildcardModalCard(card);
       return;
     }
 
-    // 2. Rainbow wildcard or targeted action modal
+    // 2. Targeted action modals
     const needsTargetModal =
-      (card.type === CardType.PROPERTY_WILDCARD && card.isRainbow) ||
-      (card.type === CardType.ACTION &&
-        [
-          ActionType.SLY_DEAL,
-          ActionType.SUPER_SLY_DEAL,
-          ActionType.FORCED_DEAL,
-          ActionType.FORCED_DEBT,
-          ActionType.DEBT_COLLECTOR,
-          ActionType.YOINK,
-          ActionType.REPOSSESS,
-          ActionType.TOUGH_LUCK,
-          ActionType.RENT,
-          ActionType.DOUBLE_THE_RENT,
-          ActionType.SHACK,
-          ActionType.HOUSE,
-          ActionType.HOTEL,
-          ActionType.DEAL_BREAKER,
-          ActionType.HEIST,
-          ActionType.MARKET_CRASH,
-          ActionType.TAX_COLLECTOR,
-          ActionType.UNFAIR_TRADE,
-        ].includes(card.actionType!));
+      card.type === CardType.ACTION &&
+      [
+        ActionType.SLY_DEAL,
+        ActionType.SUPER_SLY_DEAL,
+        ActionType.FORCED_DEAL,
+        ActionType.FORCED_DEBT,
+        ActionType.DEBT_COLLECTOR,
+        ActionType.YOINK,
+        ActionType.REPOSSESS,
+        ActionType.TOUGH_LUCK,
+        ActionType.RENT,
+        ActionType.DOUBLE_THE_RENT,
+        ActionType.SHACK,
+        ActionType.HOUSE,
+        ActionType.HOTEL,
+        ActionType.DEAL_BREAKER,
+        ActionType.HEIST,
+        ActionType.MARKET_CRASH,
+        ActionType.TAX_COLLECTOR,
+        ActionType.UNFAIR_TRADE,
+      ].includes(card.actionType!);
 
     if (needsTargetModal) {
       setTargetingCard(card);

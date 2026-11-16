@@ -465,6 +465,45 @@ export class GameEngine {
     }
     // ── 2. PROPERTY WILDCARD ─────────────────────────────────────────────
     else if (card.type === CardType.PROPERTY_WILDCARD) {
+      if (card.isRainbow) {
+        const ownedSets = player.properties.filter((s) => s.cards.length > 0);
+        if (ownedSets.length === 0) {
+          return {
+            success: false,
+            error: 'You cannot start a new color with a Rainbow Wildcard! It must match a property color you already own on the table.',
+          };
+        }
+        const chosenColor = options?.targetColor;
+        if (!chosenColor || !ownedSets.some((s) => s.color === chosenColor)) {
+          return {
+            success: false,
+            error: 'A Rainbow Wildcard can only be placed on a property color you already own on the table!',
+          };
+        }
+        const set = player.properties.find((s) => s.color === chosenColor);
+        if (!set) {
+          return {
+            success: false,
+            error: 'A Rainbow Wildcard can only be placed on a property color you already own on the table!',
+          };
+        }
+        player.hand.splice(cardIndex, 1);
+        set.cards.push(card);
+        const config = PROPERTY_CONFIG[chosenColor];
+        set.isComplete = config ? set.cards.length >= config.setSize : false;
+
+        GameEngine.addLog(
+          room,
+          playerId,
+          'PLAY_WILDCARD',
+          `🌈 ${player.displayName} added Rainbow Wildcard into their ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor} property set.`
+        );
+        room.gameState.playsUsedThisTurn++;
+        GameEngine.checkAndBroadcastWin(room, player);
+        return { success: true };
+      }
+
+      // Dual-color wildcard:
       const chosenColor = options?.targetColor || card.colors?.[0] || PropertyColor.DARK_BLUE;
       player.hand.splice(cardIndex, 1);
       let set = player.properties.find((s) => s.color === chosenColor);
@@ -482,6 +521,9 @@ export class GameEngine {
         'PLAY_WILDCARD',
         `${player.displayName} put wildcard ${card.name} into their ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor} property set.`
       );
+      room.gameState.playsUsedThisTurn++;
+      GameEngine.checkAndBroadcastWin(room, player);
+      return { success: true };
     }
     // ── 3. ACTION CARDS ───────────────────────────────────────────────────
     else if (card.type === CardType.ACTION) {

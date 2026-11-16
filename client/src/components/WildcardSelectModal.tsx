@@ -48,9 +48,9 @@ export const WildcardSelectModal: React.FC<WildcardSelectModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-emerald-950 mb-3">
           <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-yellow-400" />
-            <h2 className="font-heading font-extrabold text-lg uppercase tracking-wide text-slate-100">
-              Play Card
+            <span className="text-xl">{card.isRainbow ? '🌈' : '🃏'}</span>
+            <h2 className="font-heading font-extrabold text-base md:text-lg uppercase tracking-wide text-slate-100">
+              {card.isRainbow ? 'Play Rainbow Wildcard' : `Play ${card.name}`}
             </h2>
           </div>
           <button
@@ -61,8 +61,10 @@ export const WildcardSelectModal: React.FC<WildcardSelectModalProps> = ({
           </button>
         </div>
 
-        <p className="text-xs text-slate-300 mb-4 leading-relaxed">
-          Pick a color. Each tile shows your current set count and the rent ladder — the highlighted row is where this card lands.
+        <p className="text-xs text-slate-300 mb-4 leading-relaxed bg-[#102b1e] p-2.5 rounded-xl border border-[#1f4d36]">
+          {card.isRainbow
+            ? 'Choose which of your current property sets to add this Rainbow Wildcard to. (Rule: A Rainbow Wildcard cannot start a new color set — it must match a property color you already own on the table).'
+            : 'Pick a color to place this dual wildcard. The highlighted rent ladder indicates your new rent value.'}
         </p>
 
         {/* Side-by-Side Color Tiles (Identical to Screenshot 1) */}

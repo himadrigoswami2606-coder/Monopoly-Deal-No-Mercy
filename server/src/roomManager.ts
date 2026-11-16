@@ -485,8 +485,16 @@ function chooseBotCardPlay(room: Room, bot: Player): {
   // 10. Play property wildcard
   const wildCard = hand.find((c) => c.type === CardType.PROPERTY_WILDCARD);
   if (wildCard) {
-    const chosenColor = wildCard.colors?.[0] || PropertyColor.DARK_BLUE;
-    return { cardId: wildCard.id, options: { targetColor: chosenColor } };
+    if (wildCard.isRainbow) {
+      // Rule: Rainbow Wildcard CANNOT start a new set! Must match an existing property set
+      const existingSet = bot.properties.find((s) => s.cards.length > 0);
+      if (existingSet) {
+        return { cardId: wildCard.id, options: { targetColor: existingSet.color } };
+      }
+    } else {
+      const chosenColor = wildCard.colors?.[0] || PropertyColor.DARK_BLUE;
+      return { cardId: wildCard.id, options: { targetColor: chosenColor } };
+    }
   }
 
   // 11. Birthday card: collect $2M from everyone
