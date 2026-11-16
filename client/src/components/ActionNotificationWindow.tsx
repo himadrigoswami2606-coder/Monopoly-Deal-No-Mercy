@@ -23,13 +23,13 @@ export const ActionNotificationWindow: React.FC<ActionNotificationWindowProps> =
 
   const [visibleRecentLog, setVisibleRecentLog] = useState<ActionLogEntry | null>(null);
 
-  // When a new log arrives, display it live with a snappy 3.8s duration
+  // When a new log arrives, display it live with a snappy 4.2s duration
   useEffect(() => {
     if (latestLog) {
       setVisibleRecentLog(latestLog);
       const timer = setTimeout(() => {
         setVisibleRecentLog(null);
-      }, 3800);
+      }, 4200);
       return () => clearTimeout(timer);
     }
   }, [latestLog?.id]);
@@ -44,6 +44,12 @@ export const ActionNotificationWindow: React.FC<ActionNotificationWindowProps> =
       }
     }
   }, [gameState.activePlayerId]);
+
+  // Most recent move performed during this active player's turn
+  const activePlayerLogs = (gameState.actionLog || []).filter(
+    (l) => l.playerId === gameState.activePlayerId
+  );
+  const lastPlayOfThisTurn = activePlayerLogs[0];
 
   // Determine announcement content
   let icon = '📢';
@@ -107,45 +113,60 @@ export const ActionNotificationWindow: React.FC<ActionNotificationWindowProps> =
     const action = visibleRecentLog.action;
     const isMe = visibleRecentLog.playerId === myPlayer.id;
     const pName = isMe ? 'You' : visibleRecentLog.playerName;
+    const moveNum = Math.max(1, Math.min(gameState.playsUsedThisTurn, gameState.maxPlaysPerTurn));
 
     if (action === 'BANK_CARD') {
       icon = '🏦';
-      badgeText = 'Bank Deposit';
+      badgeText = `Bank Deposit (Move ${moveNum}/3)`;
       badgeBg = 'bg-emerald-500/25 text-emerald-300 border-emerald-400/40';
       borderColor = 'border-emerald-500/60';
-      title = `${pName} deposited into Bank`;
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
       subtitle = visibleRecentLog.details;
     } else if (action === 'PLAY_PROPERTY') {
       icon = '🏠';
-      badgeText = 'Property Placed';
+      badgeText = `Property Placed (Move ${moveNum}/3)`;
       badgeBg = 'bg-cyan-500/25 text-cyan-300 border-cyan-400/40';
       borderColor = 'border-cyan-500/60';
-      title = `${pName} put a Property on Table`;
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
       subtitle = visibleRecentLog.details;
     } else if (action === 'PLAY_WILDCARD') {
       icon = '🌈';
-      badgeText = 'Wildcard';
+      badgeText = `Wildcard (Move ${moveNum}/3)`;
       badgeBg = 'bg-purple-500/25 text-purple-300 border-purple-400/40';
       borderColor = 'border-purple-500/60';
-      title = `${pName} placed a Wildcard`;
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
       subtitle = visibleRecentLog.details;
     } else if (action === 'SHACK_ADDED') {
       icon = '🛖';
-      badgeText = 'Shack (+ $3M Rent)';
+      badgeText = `Shack Attached (Move ${moveNum}/3)`;
       badgeBg = 'bg-amber-500/25 text-amber-300 border-amber-400/40';
       borderColor = 'border-amber-500/60';
-      title = `${pName} placed a Shack`;
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
       subtitle = visibleRecentLog.details;
     } else if (action === 'HOUSE_ADDED' || action === 'HOTEL_ADDED') {
       icon = action === 'HOTEL_ADDED' ? '🏨' : '🏠';
-      badgeText = action === 'HOTEL_ADDED' ? 'Hotel (+ $4M)' : 'House (+ $3M)';
+      badgeText = action === 'HOTEL_ADDED' ? `Hotel (+ $4M) (Move ${moveNum}/3)` : `House (+ $3M) (Move ${moveNum}/3)`;
       badgeBg = 'bg-emerald-500/25 text-emerald-300 border-emerald-400/40';
       borderColor = 'border-emerald-500/60';
-      title = `${pName} built a Building Upgrade`;
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
+      subtitle = visibleRecentLog.details;
+    } else if (action === 'FLIP_WILDCARD') {
+      icon = '🔄';
+      badgeText = `Flipped Wildcard (Move ${moveNum}/3)`;
+      badgeBg = 'bg-purple-500/25 text-purple-300 border-purple-400/40';
+      borderColor = 'border-purple-500/60';
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
+      subtitle = visibleRecentLog.details;
+    } else if (action === 'MOVE_SHACK') {
+      icon = '🛖';
+      badgeText = `Moved Shack (Move ${moveNum}/3)`;
+      badgeBg = 'bg-amber-500/25 text-amber-300 border-amber-400/40';
+      borderColor = 'border-amber-500/60';
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
       subtitle = visibleRecentLog.details;
     } else if (action === 'DRAW_CARDS') {
       icon = '🎴';
-      badgeText = 'Cards Drawn';
+      badgeText = 'Turn Start Draw';
       badgeBg = 'bg-blue-500/25 text-blue-300 border-blue-400/40';
       borderColor = 'border-blue-500/50';
       title = `${pName} drew Cards`;
@@ -180,31 +201,38 @@ export const ActionNotificationWindow: React.FC<ActionNotificationWindowProps> =
       subtitle = visibleRecentLog.details;
     } else {
       icon = '⚡';
-      badgeText = 'Action Update';
+      badgeText = `Action Played (Move ${moveNum}/3)`;
       badgeBg = 'bg-amber-400/20 text-amber-300 border-amber-400/30';
       borderColor = 'border-emerald-500/50';
-      title = pName;
+      title = `${pName.toUpperCase()} — MOVE ${moveNum} OF 3`;
       subtitle = visibleRecentLog.details;
     }
   } else {
-    // Idle state between plays — perfectly synced to the active player!
+    // Idle state between plays — perfectly synced with detail on last move and upcoming move!
     const isMyTurn = gameState.activePlayerId === myPlayer.id;
     const currentPlayNum = Math.min(gameState.playsUsedThisTurn + 1, gameState.maxPlaysPerTurn);
+    const pName = activePlayer?.displayName || 'Opponent';
 
     if (isMyTurn) {
       icon = '🎯';
       badgeText = '👉 Your Turn';
       badgeBg = 'bg-amber-400/25 text-amber-300 border-amber-400/50 animate-pulse';
       borderColor = 'border-amber-400/60 ring-1 ring-amber-400/20';
-      title = `YOUR TURN — PLAY ${currentPlayNum} OF ${gameState.maxPlaysPerTurn}`;
-      subtitle = `You have played ${gameState.playsUsedThisTurn}/${gameState.maxPlaysPerTurn} cards. Click a card from your hand to play or bank, or click End Turn.`;
+      title = `YOUR TURN — SHOT ${currentPlayNum} OF ${gameState.maxPlaysPerTurn}`;
+      subtitle =
+        gameState.playsUsedThisTurn > 0 && lastPlayOfThisTurn
+          ? `Last move: ${lastPlayOfThisTurn.details} · Choose your next card to play or bank.`
+          : `You have played 0 of 3 cards. Click a card from your hand to play or bank, or end turn.`;
     } else {
       icon = '🎲';
-      badgeText = `⏳ ${activePlayer?.displayName || 'Opponent'}'s Turn`;
+      badgeText = `⏳ ${pName}'s Turn`;
       badgeBg = 'bg-[#133324] text-emerald-300 border-[#1f4d36]';
       borderColor = 'border-[#1f4d36]';
-      title = `${(activePlayer?.displayName || 'Opponent').toUpperCase()}'S TURN — PLAY ${currentPlayNum} OF ${gameState.maxPlaysPerTurn}`;
-      subtitle = `${activePlayer?.displayName || 'Opponent'} is deciding their next move (${gameState.playsUsedThisTurn}/${gameState.maxPlaysPerTurn} cards played)...`;
+      title = `${pName.toUpperCase()}'S TURN — SHOT ${currentPlayNum} OF ${gameState.maxPlaysPerTurn}`;
+      subtitle =
+        gameState.playsUsedThisTurn > 0 && lastPlayOfThisTurn
+          ? `Move ${gameState.playsUsedThisTurn}: ${lastPlayOfThisTurn.details} · Deciding shot ${currentPlayNum}...`
+          : `${pName} is deciding their first move (0 of 3 cards played)...`;
     }
   }
 

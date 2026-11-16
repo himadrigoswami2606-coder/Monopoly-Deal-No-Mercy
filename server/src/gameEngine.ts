@@ -623,9 +623,9 @@ export class GameEngine {
         if (set?.hotel) baseRent += 4;
         rentAmount = card.actionType === ActionType.DOUBLE_THE_RENT ? baseRent * 2 : baseRent;
       }
-      targets = (card.isWildRent && targetOpponent)
-        ? [targetOpponent]
-        : (targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== player.id));
+      targets = card.isWildRent
+        ? (targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== player.id).slice(0, 1))
+        : room.players.filter((p) => p.id !== player.id);
     } else if (card.actionType === ActionType.ITS_MY_BIRTHDAY) {
       rentAmount = 2;
       targets = room.players.filter((p) => p.id !== player.id);
@@ -826,7 +826,7 @@ export class GameEngine {
     }
 
     if (card.actionType === ActionType.MARKET_CRASH) {
-      GameEngine.executeMarketCrashOnTarget(room, player, firstTarget);
+      GameEngine.executeMarketCrashOnTarget(room, player, firstTarget, options?.marketCrashSelections?.[firstTarget.id]);
       if (targets.length > 1) {
         room.gameState.pendingAction = {
           id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1169,7 +1169,7 @@ export class GameEngine {
         if (pending.actionType === ActionType.MARKET_CRASH) {
           const attacker = room.players.find((p) => p.id === pending.attackerId);
           if (attacker) {
-            GameEngine.executeMarketCrashOnTarget(room, attacker, nextPlayer);
+            GameEngine.executeMarketCrashOnTarget(room, attacker, nextPlayer, pending.options?.marketCrashSelections?.[nextPlayer.id]);
           }
           pending.targetPlayerIds.shift();
           continue;
@@ -1593,7 +1593,12 @@ export class GameEngine {
    * Executes Market Crash on 1 target: steals 1 property card from their table.
    * Complete sets ARE fair game! If stolen property had a Shack, Shack transfers with it!
    */
-  static executeMarketCrashOnTarget(room: Room, attacker: Player, target: Player): void {
+  static executeMarketCrashOnTarget(
+    room: Room,
+    attacker: Player,
+    target: Player,
+    chosenCardId?: string
+  ): void {
     const allSets = target.properties.filter((s) => s.cards.length > 0);
     if (allSets.length === 0) {
       GameEngine.addLog(
@@ -1607,21 +1612,34 @@ export class GameEngine {
 
     let bestSet = allSets[0];
     let bestCardIdx = 0;
-    let maxVal = -1;
 
-    allSets.forEach((set) => {
-      set.cards.forEach((c, idx) => {
-        if (c.cashValue > maxVal) {
-          maxVal = c.cashValue;
+    if (chosenCardId) {
+      // Find the user's explicitly chosen property
+      for (const set of allSets) {
+        const cIdx = set.cards.findIndex((c) => c.id === chosenCardId);
+        if (cIdx !== -1) {
           bestSet = set;
-          bestCardIdx = idx;
+          bestCardIdx = cIdx;
+          break;
         }
+      }
+    } else {
+      // Fallback (e.g. for AI Bot): pick highest value card
+      let maxVal = -1;
+      allSets.forEach((set) => {
+        set.cards.forEach((c, idx) => {
+          if (c.cashValue > maxVal) {
+            maxVal = c.cashValue;
+            bestSet = set;
+            bestCardIdx = idx;
+          }
+        });
       });
-    });
+    }
 
     const [stolenCard] = bestSet.cards.splice(bestCardIdx, 1);
     const hadShack = bestSet.shack;
-    if (hadShack) {
+    if (hadShack && bestSet.cards.length === 0) {
       bestSet.shack = false;
     }
     bestSet.isComplete = bestSet.cards.length >= (PROPERTY_CONFIG[bestSet.color]?.setSize || 3);
@@ -1643,7 +1661,7 @@ export class GameEngine {
       room,
       attacker.id,
       'MARKET_CRASH_SUCCESS',
-      `📉 MARKET CRASH! ${attacker.displayName} seized ${stolenCard.name} ${hadShack ? '(with attached Shack!) ' : ''}from ${target.displayName}'s collection!`
+      `📉 MARKET CRASH! ${attacker.displayName} seized ${stolenCard.name} ($${stolenCard.cashValue}M)${hadShack ? ' (with attached Shack!)' : ''} from ${target.displayName}'s collection!`
     );
     GameEngine.checkAndBroadcastWin(room, attacker);
   }

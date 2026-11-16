@@ -202,6 +202,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     targetCardId?: string;
     myCardId?: string;
     chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
+    marketCrashSelections?: Record<string, string>;
   }) => {
     if (!targetingCard) return;
     sounds.playActionAttack();

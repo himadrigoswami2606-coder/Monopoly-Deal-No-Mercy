@@ -185,15 +185,25 @@ export const PlayerPropertiesModal: React.FC<PlayerPropertiesModalProps> = ({
                               </span>
 
                               {/* Flip Wildcard Button (Self Only, Costs 1 Turn Play) */}
-                              {isSelf && isMyTurn && playsRemaining > 0 && isWild && onFlipWildcard && (
-                                <button
-                                  type="button"
-                                  onClick={() => setFlippingCardId(isFlipping ? null : c.id)}
-                                  className="ml-2 text-[9px] font-bold text-amber-300 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 px-1.5 py-0.5 rounded border border-amber-400/40 transition-colors"
-                                  title="Flip wildcard to another color (Costs 1 shot)"
-                                >
-                                  🔄 Flip
-                                </button>
+                              {isSelf && isWild && onFlipWildcard && (
+                                isMyTurn && playsRemaining > 0 ? (
+                                  <button
+                                    type="button"
+                                    onClick={() => setFlippingCardId(isFlipping ? null : c.id)}
+                                    className="ml-2 text-[9px] font-bold text-amber-300 hover:text-amber-200 bg-amber-500/20 hover:bg-amber-500/30 px-2 py-0.5 rounded border border-amber-400/40 transition-colors shadow-sm"
+                                    title="Flip wildcard to another color (Costs 1 shot)"
+                                  >
+                                    🔄 Flip (1 Shot)
+                                  </button>
+                                ) : !isMyTurn ? (
+                                  <span className="ml-2 text-[8px] font-medium text-slate-500 bg-black/30 px-1.5 py-0.5 rounded border border-slate-700/50" title="You can only flip wildcards on your turn">
+                                    Flip on your turn
+                                  </span>
+                                ) : (
+                                  <span className="ml-2 text-[8px] font-medium text-amber-500/80 bg-black/30 px-1.5 py-0.5 rounded border border-slate-700/50">
+                                    3/3 plays used
+                                  </span>
+                                )
                               )}
                             </div>
                           );

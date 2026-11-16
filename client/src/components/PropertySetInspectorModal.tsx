@@ -189,7 +189,11 @@ export const PropertySetInspectorModal: React.FC<PropertySetInspectorModalProps>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 p-1">
             {set.cards.map((c) => {
-              const isWild = c.type === CardType.PROPERTY_WILDCARD;
+              const isWild =
+                c.type === CardType.PROPERTY_WILDCARD ||
+                (c.type as any) === 'PROPERTY_WILDCARD' ||
+                !!c.isRainbow ||
+                (Array.isArray(c.colors) && c.colors.length > 1);
               const isSelectedForFlip = flippingCardId === c.id;
 
               // Color choices for wildcard
@@ -198,56 +202,109 @@ export const PropertySetInspectorModal: React.FC<PropertySetInspectorModalProps>
                 : (c.colors || []).filter((col) => col !== set.color);
 
               return (
-                <div key={c.id} className="flex flex-col items-center">
-                  <div className="transform scale-90 sm:scale-100 origin-top">
+                <div
+                  key={c.id}
+                  className={`flex flex-col items-center ${
+                    isWild && isOwner && isMyTurn && playsRemaining > 0 ? 'cursor-pointer group' : ''
+                  }`}
+                  onClick={() => {
+                    if (isWild && isOwner && isMyTurn && playsRemaining > 0) {
+                      if (availableColors.length === 1) {
+                        onFlipWildcard(c, availableColors[0]);
+                        onClose();
+                      } else {
+                        setFlippingCardId(isSelectedForFlip ? null : c.id);
+                      }
+                    }
+                  }}
+                >
+                  <div className="transform scale-90 sm:scale-100 origin-top transition-transform group-hover:scale-95">
                     <CardView card={c} size="sm" isPlayable={false} />
                   </div>
 
                   {/* Wildcard Flip Button (Points 3, 5, 9) */}
-                  {isWild && isOwner && isMyTurn && playsRemaining > 0 && (
+                  {isWild && isOwner && (
                     <div className="w-full mt-2 flex flex-col items-center">
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setFlippingCardId(isSelectedForFlip ? null : c.id)
-                        }
-                        className="w-full py-1.5 px-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-heading font-black text-[10px] uppercase tracking-wider rounded-xl shadow active:scale-95 transition-all"
-                      >
-                        {isSelectedForFlip ? 'Cancel Flip' : '🔄 Flip Color (1 Play)'}
-                      </button>
+                      {isMyTurn && playsRemaining > 0 ? (
+                        availableColors.length === 1 ? (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onFlipWildcard(c, availableColors[0]);
+                              onClose();
+                            }}
+                            className="w-full py-2 px-2 rounded-xl text-[10px] font-heading font-black uppercase tracking-wider text-center transition-all hover:scale-105 active:scale-95 shadow-lg border border-white/20"
+                            style={{
+                              backgroundColor: PROPERTY_CONFIG[availableColors[0]]?.hexColor || '#f59e0b',
+                              color: PROPERTY_CONFIG[availableColors[0]]?.textColor || '#000',
+                            }}
+                            title={`Flip wildcard to ${PROPERTY_CONFIG[availableColors[0]]?.name} (Costs 1 shot)`}
+                          >
+                            🔄 Flip to {PROPERTY_CONFIG[availableColors[0]]?.name} (1 Play)
+                          </button>
+                        ) : (
+                          <>
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setFlippingCardId(isSelectedForFlip ? null : c.id);
+                              }}
+                              className="w-full py-1.5 px-2 bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-heading font-black text-[10px] uppercase tracking-wider rounded-xl shadow active:scale-95 transition-all"
+                            >
+                              {isSelectedForFlip ? 'Cancel Flip' : '🔄 Flip Color (1 Play)'}
+                            </button>
 
-                      {isSelectedForFlip && (
-                        <div className="w-full mt-1.5 p-2 bg-slate-950/90 border border-amber-400/40 rounded-xl space-y-1 animate-fade-in">
-                          <div className="text-[9px] text-slate-300 font-bold uppercase text-center">
-                            Flip to:
-                          </div>
-                          {availableColors.length === 0 ? (
-                            <div className="text-[9px] text-rose-400 text-center italic">
-                              No eligible colors to flip to.
-                            </div>
-                          ) : (
-                            availableColors.map((targetCol) => {
-                              const tConf = PROPERTY_CONFIG[targetCol];
-                              return (
-                                <button
-                                  key={targetCol}
-                                  type="button"
-                                  onClick={() => {
-                                    onFlipWildcard(c, targetCol);
-                                    setFlippingCardId(null);
-                                    onClose();
-                                  }}
-                                  className="w-full py-1 px-1.5 rounded-lg text-[9px] font-bold uppercase tracking-tight text-center transition-transform hover:scale-105 active:scale-95 shadow"
-                                  style={{
-                                    backgroundColor: tConf?.hexColor,
-                                    color: tConf?.textColor,
-                                  }}
-                                >
-                                  {tConf?.name}
-                                </button>
-                              );
-                            })
-                          )}
+                            {isSelectedForFlip && (
+                              <div
+                                onClick={(e) => e.stopPropagation()}
+                                className="w-full mt-1.5 p-2 bg-slate-950/95 border border-amber-400/50 rounded-xl space-y-1 animate-fade-in shadow-2xl"
+                              >
+                                <div className="text-[9px] text-slate-300 font-bold uppercase text-center">
+                                  Flip to:
+                                </div>
+                                {availableColors.length === 0 ? (
+                                  <div className="text-[9px] text-rose-400 text-center italic">
+                                    No eligible colors to flip to.
+                                  </div>
+                                ) : (
+                                  availableColors.map((targetCol) => {
+                                    const tConf = PROPERTY_CONFIG[targetCol];
+                                    return (
+                                      <button
+                                        key={targetCol}
+                                        type="button"
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          onFlipWildcard(c, targetCol);
+                                          setFlippingCardId(null);
+                                          onClose();
+                                        }}
+                                        className="w-full py-1 px-1.5 rounded-lg text-[9px] font-bold uppercase tracking-tight text-center transition-transform hover:scale-105 active:scale-95 shadow"
+                                        style={{
+                                          backgroundColor: tConf?.hexColor,
+                                          color: tConf?.textColor,
+                                        }}
+                                      >
+                                        ➔ {tConf?.name}
+                                      </button>
+                                    );
+                                  })
+                                )}
+                              </div>
+                            )}
+                          </>
+                        )
+                      ) : !isMyTurn ? (
+                        <div className="w-full py-1.5 px-2 bg-slate-950/70 border border-slate-800 rounded-xl text-center">
+                          <div className="text-[10px] font-bold text-slate-400">🔄 Flip Wildcard</div>
+                          <div className="text-[8px] text-slate-500 uppercase tracking-tight">Available on your turn (1 Play)</div>
+                        </div>
+                      ) : (
+                        <div className="w-full py-1.5 px-2 bg-slate-950/70 border border-slate-800 rounded-xl text-center">
+                          <div className="text-[10px] font-bold text-slate-400">🔄 Flip Wildcard</div>
+                          <div className="text-[8px] text-amber-500/80 uppercase tracking-tight">3 of 3 plays used</div>
                         </div>
                       )}
                     </div>
