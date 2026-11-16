@@ -38,6 +38,8 @@ import {
   EVENT_SUBMIT_REPOSSESS,
   EVENT_SUBMIT_TAX_COLLECTOR,
   EVENT_MOVE_SHACK,
+  EVENT_SET_AI_SPEED,
+  AISpeed,
   PropertyColor,
 } from '../../shared/types';
 import { GameEngine } from './gameEngine';
@@ -103,6 +105,29 @@ function broadcastGameState(io: SocketIOServer, room: Room): void {
 }
 
 /**
+ * Calculates dynamic delay timings based on the room's AI speed setting.
+ */
+function getBotSpeedDelay(room: Room): {
+  reactionMs: number;
+  cardMs: number;
+  turnStartMs: number;
+  endTurnMs: number;
+} {
+  const speed = room.aiSpeed || 'NORMAL';
+  switch (speed) {
+    case 'FAST':
+      return { reactionMs: 500, cardMs: 700, turnStartMs: 700, endTurnMs: 500 };
+    case 'REALISTIC':
+      return { reactionMs: 2000, cardMs: 2600, turnStartMs: 2400, endTurnMs: 1600 };
+    case 'SLOW':
+      return { reactionMs: 3200, cardMs: 4200, turnStartMs: 4000, endTurnMs: 2500 };
+    case 'NORMAL':
+    default:
+      return { reactionMs: 1000, cardMs: 1600, turnStartMs: 1500, endTurnMs: 1000 };
+  }
+}
+
+/**
  * Automatically resolves reactions for AI Bot players (Just Say No, Payment, Repossess).
  */
 function triggerBotReactionIfPending(io: SocketIOServer, room: Room): void {
@@ -110,6 +135,8 @@ function triggerBotReactionIfPending(io: SocketIOServer, room: Room): void {
   const pending = room.gameState.pendingAction;
   const bot = room.players.find((p) => p.id === pending.currentAwaitingPlayerId && p.isBot);
   if (!bot) return;
+
+  const delays = getBotSpeedDelay(room);
 
   setTimeout(() => {
     if (!room.gameState?.pendingAction || room.gameState.pendingAction.id !== pending.id) return;
@@ -178,7 +205,7 @@ function triggerBotReactionIfPending(io: SocketIOServer, room: Room): void {
       GameEngine.submitTaxCollector(room, bot.id, pending.id, keepCard?.id || '', distributions);
       broadcastGameState(io, room);
     }
-  }, 750);
+  }, delays.reactionMs);
 }
 
 /**
@@ -497,6 +524,8 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
   const activePlayer = room.players.find((p) => p.id === room.gameState!.activePlayerId);
   if (!activePlayer || !activePlayer.isBot) return;
 
+  const delays = getBotSpeedDelay(room);
+
   setTimeout(() => {
     if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer.id) return;
 
@@ -506,7 +535,7 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
       if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer!.id) return;
 
       if (room.gameState.pendingAction) {
-        setTimeout(executeNextPlay, 800);
+        setTimeout(executeNextPlay, delays.reactionMs);
         return;
       }
 
@@ -522,7 +551,7 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
           broadcastGameState(io, room);
 
           if (!room.gameState.isGameOver && room.gameState.playsUsedThisTurn < room.gameState.maxPlaysPerTurn) {
-            setTimeout(executeNextPlay, 900);
+            setTimeout(executeNextPlay, delays.cardMs);
             return;
           }
         }
@@ -539,11 +568,11 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
           GameEngine.endTurn(room, activePlayer!.id);
           broadcastGameState(io, room);
         }
-      }, 700);
+      }, delays.endTurnMs);
     }
 
     executeNextPlay();
-  }, 1000);
+  }, delays.turnStartMs);
 }
 
 /**
@@ -748,6 +777,25 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     if (data.winMode === WinMode.STANDARD_NO_MERCY || data.winMode === WinMode.EXTENDED_NO_MERCY) {
       room.winMode = data.winMode;
       broadcastRoomUpdate(io, room);
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // 5B. SET AI SPEED (Fast, Normal, Realistic, Slow)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_SET_AI_SPEED, (data: { speed: AISpeed }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    if (!roomCode) return;
+
+    const room = rooms.get(roomCode);
+    if (!room) return;
+
+    if (['FAST', 'NORMAL', 'REALISTIC', 'SLOW'].includes(data?.speed)) {
+      room.aiSpeed = data.speed;
+      broadcastRoomUpdate(io, room);
+      if (room.gameState) {
+        broadcastGameState(io, room);
+      }
     }
   });
 

@@ -21,6 +21,8 @@ import {
   EVENT_SUBMIT_TAX_COLLECTOR,
   EVENT_FLIP_WILDCARD,
   EVENT_MOVE_SHACK,
+  EVENT_SET_AI_SPEED,
+  AISpeed,
   PropertySet,
 } from '../../../shared/types';
 import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
@@ -31,6 +33,7 @@ import { ActionTargetModal } from './ActionTargetModal';
 import { ActionReactionModal } from './ActionReactionModal';
 import { WildcardSelectModal } from './WildcardSelectModal';
 import { RulesHelpModal } from './RulesHelpModal';
+import { AISettingsModal } from './AISettingsModal';
 import { HandLimitDiscardModal } from './HandLimitDiscardModal';
 import { RepossessModal } from './RepossessModal';
 import { TaxCollectorModal } from './TaxCollectorModal';
@@ -61,6 +64,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [wildcardModalCard, setWildcardModalCard] = useState<Card | null>(null);
   const [showLogDrawer, setShowLogDrawer] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [showAISettingsModal, setShowAISettingsModal] = useState(false);
   const [inspectingBank, setInspectingBank] = useState<{
     playerName: string;
     totalAmount: number;
@@ -344,6 +348,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           >
             <span className="text-sm">❓</span>
             <span className="hidden sm:inline">Rules & Cards</span>
+          </button>
+
+          {/* AI Speed & Settings Button */}
+          <button
+            onClick={() => setShowAISettingsModal(true)}
+            className="p-1 px-2.5 rounded-lg bg-[#133324] border border-[#1f4d36] hover:border-amber-400 text-amber-300 text-xs font-semibold flex items-center gap-1.5 shadow transition-all hover:bg-[#1a402e]"
+            title="Configure AI Bot Speed & Thinking Time"
+          >
+            <span>🤖</span>
+            <span className="hidden sm:inline">AI Speed:</span>
+            <span className="font-mono text-emerald-400 font-bold">
+              {room.aiSpeed === 'FAST' ? 'Fast' : room.aiSpeed === 'REALISTIC' ? 'Human' : room.aiSpeed === 'SLOW' ? 'Relaxed' : 'Normal'}
+            </span>
           </button>
 
           {/* Background Lounge Music Toggle */}
@@ -1204,6 +1221,19 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       {/* ─────────────────────────────────────────────────────────────────── */}
       {showRulesModal && (
         <RulesHelpModal onClose={() => setShowRulesModal(false)} />
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 8B. AI SPEED SETTINGS MODAL                                         */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {showAISettingsModal && (
+        <AISettingsModal
+          currentSpeed={room.aiSpeed || 'NORMAL'}
+          onSetSpeed={(speed: AISpeed) => {
+            socket?.emit(EVENT_SET_AI_SPEED, { speed });
+          }}
+          onClose={() => setShowAISettingsModal(false)}
+        />
       )}
 
       {/* ─────────────────────────────────────────────────────────────────── */}

@@ -341,12 +341,15 @@ export interface WinConditionResult {
 //  Room
 // ---------------------------------------------------------------------------
 
+export type AISpeed = 'FAST' | 'NORMAL' | 'REALISTIC' | 'SLOW';
+
 /** A lobby / game room. */
 export interface Room {
   id: string;
   code: string;
   hostId: string;
   winMode: WinMode;
+  aiSpeed?: AISpeed;
   players: Player[];
   gameState: GameState | null;
   maxPlayers: number;
@@ -377,6 +380,7 @@ export const EVENT_SUBMIT_PAYMENT   = 'submit-payment'   as const;
 export const EVENT_SUBMIT_REPOSSESS = 'submit-repossess' as const;
 export const EVENT_SUBMIT_TAX_COLLECTOR = 'submit-tax-collector' as const;
 export const EVENT_MOVE_SHACK       = 'move-shack'       as const;
+export const EVENT_SET_AI_SPEED     = 'set-ai-speed'     as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
 export const EVENT_ROOM_JOINED      = 'room-joined'      as const;
@@ -417,6 +421,7 @@ export interface ClientToServerEvents {
   [EVENT_SUBMIT_REPOSSESS]: (data: { actionId: string; keepCardId: string; distributions: { cardId: string; targetPlayerId: string }[] }) => void;
   [EVENT_SUBMIT_TAX_COLLECTOR]: (data: { actionId: string; keepCardId: string; distributions: { cardId: string; targetPlayerId: string }[] }) => void;
   [EVENT_MOVE_SHACK]: (data: { fromColor: PropertyColor; toColor: PropertyColor }) => void;
+  [EVENT_SET_AI_SPEED]: (data: { speed: AISpeed }) => void;
 }
 
 export interface ServerToClientEvents {
