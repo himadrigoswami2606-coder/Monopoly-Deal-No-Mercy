@@ -334,15 +334,41 @@ export function createDeck(): Card[] {
   // 4. ACTION & BUILDING CARDS (53 total)
   // ==========================================
 
-  // Pass Go (x10, $1M) — Draw 2 cards
-  for (let i = 1; i <= 10; i++) {
+  // Pass Go, Go, Go! (x4, $1M) — Draw until 7 cards in hand (No Mercy Rule)
+  for (let i = 1; i <= 4; i++) {
+    deck.push(
+      createActionCard(
+        `action-passgogogo-${i}`,
+        'Pass Go, Go, Go!',
+        ActionType.PASS_GO_GO_GO,
+        1,
+        'Draw cards from the draw pile until you hold 7 cards in your hand!'
+      )
+    );
+  }
+
+  // Pass Go (x4, $1M) — Refills hand up to 7 cards
+  for (let i = 1; i <= 4; i++) {
     deck.push(
       createActionCard(
         `action-passgo-${i}`,
         'Pass Go',
         ActionType.PASS_GO,
         1,
-        'Draw 2 extra cards from the draw pile.'
+        'Draw cards from the draw pile until you hold 7 cards in your hand!'
+      )
+    );
+  }
+
+  // Go Again (x3, $2M) — Take another full turn immediately! (No Mercy Action)
+  for (let i = 1; i <= 3; i++) {
+    deck.push(
+      createActionCard(
+        `action-goagain-${i}`,
+        'Go Again',
+        ActionType.GO_AGAIN,
+        2,
+        'Take another full turn immediately! Draw 2 new cards and get 3 fresh card plays.'
       )
     );
   }

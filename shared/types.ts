@@ -20,6 +20,8 @@ export enum CardType {
 /** Every distinct action card available in the No Mercy expansion. */
 export enum ActionType {
   PASS_GO          = 'PASS_GO',
+  PASS_GO_GO_GO    = 'PASS_GO_GO_GO',
+  GO_AGAIN         = 'GO_AGAIN',
   DOUBLE_THE_RENT  = 'DOUBLE_THE_RENT',
   RENT             = 'RENT',
   HOUSE            = 'HOUSE',
@@ -115,6 +117,9 @@ export interface DebtChip {
 
   /** Player currently holding (owing) the chip. */
   currentHolderId: string;
+
+  /** Timestamp when the chip was acquired by current holder (for FIFO priority). */
+  acquiredAt?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -234,6 +239,12 @@ export interface ActionLogEntry {
 //  Game State
 // ---------------------------------------------------------------------------
 
+export interface PendingDebtSettlement {
+  playerId: string;
+  drawnCards: Card[];
+  creditorIds: string[]; // prioritized by acquiredAt
+}
+
 /** The authoritative state of an in-progress game. */
 export interface GameState {
   /** ID of the player whose turn it currently is. */
@@ -265,6 +276,9 @@ export interface GameState {
 
   /** Detailed breakdown of the win condition when won. */
   winBreakdown: WinConditionResult | null;
+
+  /** Staged drawn cards for debt settlement at turn start (Point 5). */
+  pendingDebtSettlement?: PendingDebtSettlement | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -317,6 +331,7 @@ export const EVENT_ADD_BOT          = 'add-bot'          as const;
 export const EVENT_REMOVE_BOT       = 'remove-bot'       as const;
 export const EVENT_FLIP_WILDCARD    = 'flip-wildcard'    as const;
 export const EVENT_SETTLE_DEBT      = 'settle-debt'      as const;
+export const EVENT_RESOLVE_DEBT_DRAW= 'resolve-debt-draw'as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
 export const EVENT_ROOM_JOINED      = 'room-joined'      as const;
@@ -351,6 +366,7 @@ export interface ClientToServerEvents {
   [EVENT_REMOVE_BOT]: (data: { botId: string }) => void;
   [EVENT_FLIP_WILDCARD]: (data: { cardId: string; toColor: PropertyColor }) => void;
   [EVENT_SETTLE_DEBT]: (data: { cardId: string; creditorId: string }) => void;
+  [EVENT_RESOLVE_DEBT_DRAW]: (data: { chosenCardId: string }) => void;
 }
 
 export interface ServerToClientEvents {

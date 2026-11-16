@@ -32,6 +32,7 @@ import {
   EVENT_REMOVE_BOT,
   EVENT_FLIP_WILDCARD,
   EVENT_SETTLE_DEBT,
+  EVENT_RESOLVE_DEBT_DRAW,
   PropertyColor,
 } from '../../shared/types';
 import { GameEngine } from './gameEngine';
@@ -131,12 +132,22 @@ function chooseBotCardPlay(room: Room, bot: Player): {
     }
   }
 
-  // 2. Pass Go: Draw 2 cards immediately to expand options
+  // 2. Pass Go / Pass Go, Go, Go!: Refills hand up to 7 cards (Point 3)
   const passGoCard = hand.find(
-    (c) => c.type === CardType.ACTION && c.actionType === ActionType.PASS_GO
+    (c) =>
+      c.type === CardType.ACTION &&
+      (c.actionType === ActionType.PASS_GO_GO_GO || c.actionType === ActionType.PASS_GO)
   );
-  if (passGoCard) {
+  if (passGoCard && bot.hand.length < 7) {
     return { cardId: passGoCard.id };
+  }
+
+  // 2B. Go Again: Take another full turn immediately! (Point 2)
+  const goAgainCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.GO_AGAIN
+  );
+  if (goAgainCard && (room.gameState?.playsUsedThisTurn || 0) >= 1) {
+    return { cardId: goAgainCard.id };
   }
 
   // 3. Complete an in-progress set using a property or wildcard
@@ -339,19 +350,6 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
   setTimeout(() => {
     if (!room.gameState || room.gameState.isGameOver || room.gameState.activePlayerId !== activePlayer.id) return;
 
-    // STEP 1: SETTLING DEBT (Rule from Geeky Hobbies / No Mercy rules)
-    // "At the start of your turn if another player has one of your debt chips, you must try to settle the debt."
-    const creditor = room.players.find(
-      (p) => p.id !== activePlayer.id && p.debtChips.some((chip) => chip.ownerId === activePlayer.id)
-    );
-    if (creditor && activePlayer.hand.length > 0) {
-      // Pick lowest value card to surrender for debt settlement
-      const cardToGive = [...activePlayer.hand].sort((a, b) => a.cashValue - b.cashValue)[0];
-      GameEngine.settleDebt(room, activePlayer.id, cardToGive.id, creditor.id);
-      broadcastGameState(io, room);
-    }
-
-    // STEP 2: STAGGERED PLAYS (Up to 3 plays per turn)
     let currentPlayIndex = 0;
 
     function executeNextPlay() {
@@ -360,7 +358,7 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
       if (
         room.gameState.playsUsedThisTurn < room.gameState.maxPlaysPerTurn &&
         activePlayer!.hand.length > 0 &&
-        currentPlayIndex < 3
+        currentPlayIndex < 6
       ) {
         const playDecision = chooseBotCardPlay(room, activePlayer!);
         if (playDecision) {
@@ -375,7 +373,7 @@ function triggerBotTurnIfActive(io: SocketIOServer, room: Room): void {
         }
       }
 
-      // STEP 3: END BOT TURN AFTER PLAYS ARE COMPLETE
+      // End Bot turn after plays are complete
       setTimeout(() => {
         if (room.gameState && !room.gameState.isGameOver && room.gameState.activePlayerId === activePlayer!.id) {
           GameEngine.endTurn(room, activePlayer!.id);
@@ -731,6 +729,26 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     const result = GameEngine.settleDebt(room, playerId, data.cardId, data.creditorId);
     if (!result.success) {
       socket.emit(EVENT_ERROR, { message: result.error || 'Cannot settle debt' });
+      return;
+    }
+
+    broadcastGameState(io, room);
+  });
+
+  // -------------------------------------------------------------------------
+  // 8C. RESOLVE DEBT RECOVERY FROM TURN START DRAW (Points 4 & 5)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_RESOLVE_DEBT_DRAW, (data: { chosenCardId: string }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
+
+    const result = GameEngine.resolveDebtDraw(room, playerId, data.chosenCardId);
+    if (!result.success) {
+      socket.emit(EVENT_ERROR, { message: result.error || 'Cannot resolve debt draw' });
       return;
     }
 

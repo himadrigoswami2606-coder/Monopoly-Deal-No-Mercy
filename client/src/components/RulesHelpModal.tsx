@@ -19,12 +19,28 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
     tip: string;
   }[] = [
     {
+      type: ActionType.PASS_GO_GO_GO,
+      name: 'Pass Go, Go, Go!',
+      cashValue: 1,
+      count: 4,
+      rule: 'Draw cards from the draw pile until you hold 7 cards in your hand!',
+      tip: 'The ultimate card refill! If you have 2 cards in hand, it draws 5 cards straight into your hand.',
+    },
+    {
+      type: ActionType.GO_AGAIN,
+      name: 'Go Again',
+      cashValue: 2,
+      count: 3,
+      rule: 'Take another full turn immediately! Current plays are considered, you pick another 2 cards from the deck, and get 3 fresh plays right at that moment! Cannot be blocked by Just Say No.',
+      tip: 'Play this on your 3rd shot to start a brand new turn and chain consecutive actions!',
+    },
+    {
       type: ActionType.PASS_GO,
       name: 'Pass Go',
       cashValue: 1,
-      count: 10,
-      rule: 'Draw 2 extra cards from the draw pile into your hand immediately.',
-      tip: 'Great early-game play to dig through the deck for properties and money.',
+      count: 4,
+      rule: 'Draw cards from the draw pile until you hold 7 cards in your hand!',
+      tip: 'Refills your hand up to the 7-card maximum limit.',
     },
     {
       type: ActionType.JUST_SAY_NO,
@@ -225,16 +241,16 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
                 </h3>
                 <ol className="list-decimal list-inside space-y-2 text-slate-300 leading-relaxed text-[11px]">
                   <li>
-                    <strong>Draw 2 Cards:</strong> At the start of your turn, draw 2 cards from the draw pile. <em>(Zero-Card Comeback: If you start with 0 cards in hand, draw 5 cards instead!)</em>
+                    <strong>Deal & First Turn:</strong> The game starts with 5 cards dealt to each player. The player with the first turn picks 2 cards from the deck (making it 7 cards).
                   </li>
                   <li>
-                    <strong>Settle Debts:</strong> If an opponent holds your Debt Chip, you must surrender a card from hand to settle it before playing normal cards!
+                    <strong>Recovering Debt Chips (Turn Start):</strong> If any opponents hold your Debt Chip, you pick up 2 cards from the deck (without mixing them into your hand). The person who got your Debt Chip first has top priority! Give 1 card to them to get your chip back (uses 1 play, 2 shots left). If 2 opponents hold your chips, give both cards to get both chips back (uses 2 plays, 1 shot left).
                   </li>
                   <li>
-                    <strong>Play up to 3 Cards:</strong> You may bank money/action cards, lay down properties, or unleash devastating action attacks against opponents.
+                    <strong>Play Maximum of 3 Shots (or None):</strong> You may play 0, 1, 2, or 3 cards on your turn. You can bank money or action cards, lay down properties, or launch aggressive action cards.
                   </li>
                   <li>
-                    <strong>End Turn & Hand Limit:</strong> Click 'End Turn'. If you hold more than 7 cards in hand at the end of your turn, discard extras to the discard pile.
+                    <strong>End Turn & Hand Limit:</strong> Click 'End Turn'. If you hold more than 7 cards in hand at the end of your turn, discard extras down to 7 cards.
                   </li>
                 </ol>
               </div>
@@ -264,10 +280,11 @@ export const RulesHelpModal: React.FC<RulesHelpModalProps> = ({ onClose }) => {
 
                   <div className="bg-[#102b1e] p-3 rounded-xl border border-slate-700">
                     <div className="font-bold text-amber-400 text-xs uppercase mb-1">
-                      Settling Debt:
+                      Priority & Recovering Debt Chips:
                     </div>
                     <p className="text-slate-300 text-[11px] leading-relaxed">
-                      On your turn, if another player holds your Debt Chip, you must choose 1 card from your hand and give it to them to settle the debt. That opponent immediately plays that card, and you take your Debt Chip back!
+                      • <strong>First-In First-Out Priority:</strong> The opponent who received your debt chip first has priority over anyone who received one later.<br />
+                      • <strong>How to Recover:</strong> At turn start, you pick up 2 cards from the deck (unmixed with hand). Give 1 of those cards to the creditor who has your chip to get it back. This counts as 1 play (1 shot done, 2 shots left). If 2 players have your debt chips, use both drawn cards to get both chips back (2 shots done, 1 shot left).
                     </p>
                   </div>
 

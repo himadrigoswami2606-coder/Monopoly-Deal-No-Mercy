@@ -36,11 +36,34 @@ export const MoneyBanknotePattern: React.FC<{ value: number }> = ({ value }) => 
 export const ActionIcon: React.FC<{ type: ActionType; className?: string }> = ({ type, className = 'w-10 h-10' }) => {
   switch (type) {
     case ActionType.PASS_GO:
+    case ActionType.PASS_GO_GO_GO:
       return (
         <svg viewBox="0 0 64 64" className={className} fill="none" stroke="currentColor">
           <circle cx="32" cy="32" r="28" fill="#eab308" fillOpacity="0.15" stroke="#eab308" strokeWidth="2.5" />
           <path d="M 18 32 L 40 32 M 32 20 L 44 32 L 32 44" stroke="#facc15" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
           <path d="M 22 20 Q 32 14 42 20" stroke="#facc15" strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+
+    case ActionType.GO_AGAIN:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          <circle cx="32" cy="32" r="28" fill="#10b981" fillOpacity="0.2" stroke="#10b981" strokeWidth="2.5" />
+          {/* Circular loop arrows */}
+          <path
+            d="M 22 32 A 10 10 0 1 1 32 42 L 32 46 M 32 42 L 28 38 M 32 42 L 36 38"
+            stroke="#34d399"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+          <path
+            d="M 42 32 A 10 10 0 1 1 32 22 L 32 18 M 32 22 L 28 26 M 32 22 L 36 26"
+            stroke="#34d399"
+            strokeWidth="3.5"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       );
 

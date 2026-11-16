@@ -15,6 +15,7 @@ import {
   EVENT_DRAW_CARDS,
   EVENT_LEAVE_ROOM,
   EVENT_SETTLE_DEBT,
+  EVENT_RESOLVE_DEBT_DRAW,
 } from '../../../shared/types';
 import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
@@ -51,6 +52,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [showLogDrawer, setShowLogDrawer] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
 
+  // Staged debt settlement from turn start draw (Points 4 & 5)
+  const pendingSettlement = gameState.pendingDebtSettlement?.playerId === myPlayer.id
+    ? gameState.pendingDebtSettlement
+    : null;
+  const [selectedPendingCardId, setSelectedPendingCardId] = useState<string | null>(null);
+
+  const handleResolveDebtDraw = (cardId?: string) => {
+    const idToUse = cardId || selectedPendingCardId || pendingSettlement?.drawnCards[0]?.id;
+    if (!idToUse) return;
+    sounds.playBankCoin();
+    socket?.emit(EVENT_RESOLVE_DEBT_DRAW, { chosenCardId: idToUse });
+    setSelectedPendingCardId(null);
+  };
+
   const isMyTurn = gameState.activePlayerId === myPlayer.id;
   const activePlayerPublic = players.find((p) => p.id === gameState.activePlayerId);
   const opponents = players.filter((p) => p.id !== myPlayer.id);
@@ -62,7 +77,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
 
   // Initiating card play
   const handleInitiatePlay = (card: Card) => {
-    if (!isMyTurn) return;
+    if (!isMyTurn || pendingSettlement) return;
 
     // 1. Wildcard modal (Screenshot 1)
     if (card.type === CardType.PROPERTY_WILDCARD && !card.isRainbow) {
@@ -134,7 +149,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   };
 
   const handleEndTurn = () => {
-    if (!isMyTurn) return;
+    if (!isMyTurn || pendingSettlement) return;
     sounds.playDrawCard();
     socket?.emit(EVENT_END_TURN);
   };
@@ -727,6 +742,100 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 className="px-5 py-2 rounded-xl font-heading font-bold text-xs uppercase bg-amber-400 hover:bg-amber-300 text-slate-950 disabled:opacity-50 disabled:cursor-not-allowed shadow transition-all"
               >
                 Surrender Card & Reclaim Chip
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 10. TURN START DEBT RECOVERY MODAL (Points 4 & 5)                   */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {pendingSettlement && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md z-50 flex items-center justify-center p-4 animate-fade-in">
+          <div className="bg-[#0b2419] border-2 border-amber-400 rounded-3xl max-w-xl w-full p-6 text-slate-100 shadow-2xl space-y-5">
+            <div className="flex items-center justify-between pb-3 border-b border-[#1f4d36]">
+              <div className="flex items-center gap-2">
+                <span className="text-2xl">🪙</span>
+                <div>
+                  <h3 className="font-heading font-black text-base uppercase text-amber-400">
+                    Debt Recovery (No Mercy Rule)
+                  </h3>
+                  <p className="text-[11px] text-slate-300">
+                    You picked up 2 cards from the deck. Reclaim your Debt Chip before playing!
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Information */}
+            <div className="bg-[#102b1e] p-3 rounded-2xl border border-[#1f4d36] text-xs leading-relaxed space-y-1">
+              {pendingSettlement.creditorIds.length === 1 ? (
+                <>
+                  <p className="text-slate-200">
+                    You owe 1 Debt Chip to{' '}
+                    <strong className="text-amber-300">
+                      {opponents.find((o) => o.id === pendingSettlement.creditorIds[0])?.displayName || 'Opponent'}
+                    </strong>{' '}
+                    (first priority).
+                  </p>
+                  <p className="text-amber-200/90 text-[11px]">
+                    👉 Select <strong>1 of the 2 drawn cards</strong> to give them. You will get your Debt Chip back, the other card joins your hand, and this counts as <strong>1 play (2 shots left)</strong>!
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p className="text-slate-200">
+                    You owe 2 Debt Chips (to{' '}
+                    <strong className="text-amber-300">
+                      {pendingSettlement.creditorIds
+                        .map((id) => opponents.find((o) => o.id === id)?.displayName)
+                        .filter(Boolean)
+                        .join(' and ')}
+                    </strong>
+                    ).
+                  </p>
+                  <p className="text-amber-200/90 text-[11px]">
+                    👉 Both drawn cards will be surrendered to reclaim both of your Debt Chips. This will count as <strong>2 plays (1 shot left)</strong>!
+                  </p>
+                </>
+              )}
+            </div>
+
+            {/* The 2 Drawn Cards Display */}
+            <div>
+              <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-2">
+                Drawn Cards (Pick 1 to surrender):
+              </div>
+              <div className="flex justify-center items-center gap-4">
+                {pendingSettlement.drawnCards.map((card) => {
+                  const isSelected = (selectedPendingCardId || pendingSettlement.drawnCards[0]?.id) === card.id;
+                  return (
+                    <div
+                      key={card.id}
+                      onClick={() => setSelectedPendingCardId(card.id)}
+                      className={`cursor-pointer transition-all transform hover:scale-105 rounded-2xl p-1.5 ${
+                        isSelected
+                          ? 'ring-4 ring-amber-400 bg-amber-400/20 scale-105 shadow-xl shadow-amber-500/20'
+                          : 'opacity-75 hover:opacity-100'
+                      }`}
+                    >
+                      <CardView card={card} />
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Action Button */}
+            <div className="pt-2 flex justify-end">
+              <button
+                onClick={() => handleResolveDebtDraw()}
+                className="w-full py-3 rounded-2xl font-heading font-black text-xs uppercase bg-amber-400 hover:bg-amber-300 text-slate-950 transition-all shadow-lg shadow-amber-500/30 tracking-wider"
+              >
+                {pendingSettlement.creditorIds.length === 1
+                  ? 'Surrender Selected Card & Reclaim Chip (1 Play Used)'
+                  : 'Surrender Both Cards & Reclaim 2 Chips (2 Plays Used)'}
               </button>
             </div>
           </div>

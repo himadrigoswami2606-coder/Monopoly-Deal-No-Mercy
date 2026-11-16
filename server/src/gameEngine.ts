@@ -75,14 +75,18 @@ export class GameEngine {
     };
 
     (room as any)._internalDrawPile = freshDeck;
+    room.gameState = gameState;
+
+    // Point 1: The player with the first turn only picks the 2 cards from deck which makes it 7
+    GameEngine.startTurnDraw(room, firstPlayer.id);
 
     return gameState;
   }
 
   /**
-   * Draws cards from the draw pile for a player, recycling discard pile if needed.
+   * Draws raw cards from draw pile (recycling discard pile if needed) without adding to hand yet.
    */
-  static drawCards(room: Room, playerId: string, count: number): Card[] {
+  static drawCardsRaw(room: Room, count: number): Card[] {
     const drawPile: Card[] = (room as any)._internalDrawPile || [];
     const discardPile: Card[] = room.gameState?.discardPile || [];
     const drawn: Card[] = [];
@@ -92,7 +96,7 @@ export class GameEngine {
         if (discardPile.length > 0) {
           const recycled = shuffleDeck(discardPile.splice(0, discardPile.length));
           drawPile.push(...recycled);
-          GameEngine.addLog(room, playerId, 'DRAW_PILE_RECYCLED', 'Discard pile reshuffled into draw pile.');
+          GameEngine.addLog(room, room.gameState?.activePlayerId || '', 'DRAW_PILE_RECYCLED', 'Discard pile reshuffled into draw pile.');
         } else {
           break;
         }
@@ -103,11 +107,6 @@ export class GameEngine {
       }
     }
 
-    const player = room.players.find((p) => p.id === playerId);
-    if (player) {
-      player.hand.push(...drawn);
-    }
-
     if (room.gameState) {
       room.gameState.drawPileCount = drawPile.length;
     }
@@ -116,21 +115,273 @@ export class GameEngine {
   }
 
   /**
-   * Starts a player's turn by drawing 2 cards (or 5 if hand is empty).
+   * Draws cards from the draw pile for a player, recycling discard pile if needed, and adds to hand.
+   */
+  static drawCards(room: Room, playerId: string, count: number): Card[] {
+    const drawn = GameEngine.drawCardsRaw(room, count);
+    const player = room.players.find((p) => p.id === playerId);
+    if (player) {
+      player.hand.push(...drawn);
+    }
+    return drawn;
+  }
+
+  /**
+   * Helper: places a surrendered card into a creditor's area immediately.
+   */
+  static giveCardToCreditor(creditor: Player, card: Card): void {
+    if (card.type === CardType.PROPERTY) {
+      const color = card.color!;
+      let set = creditor.properties.find((s) => s.color === color);
+      if (!set) {
+        set = { color, cards: [], house: false, hotel: false, isComplete: false };
+        creditor.properties.push(set);
+      }
+      set.cards.push(card);
+      set.isComplete = set.cards.length >= (PROPERTY_CONFIG[color]?.setSize || 3);
+    } else if (card.type === CardType.PROPERTY_WILDCARD) {
+      const color = card.colors?.[0] || PropertyColor.DARK_BLUE;
+      let set = creditor.properties.find((s) => s.color === color);
+      if (!set) {
+        set = { color, cards: [], house: false, hotel: false, isComplete: false };
+        creditor.properties.push(set);
+      }
+      set.cards.push(card);
+      set.isComplete = set.cards.length >= (PROPERTY_CONFIG[color]?.setSize || 3);
+    } else {
+      creditor.bank.push(card);
+    }
+  }
+
+  /**
+   * Starts a player's turn:
+   * 1. Checks if any opponents hold this player's Debt Chips (FIFO priority: person who got the chip first has top priority).
+   * 2. Draws 2 cards from deck (or 5 if hand is empty).
+   * 3. If no debt chips owed: puts 2 cards in hand, playsUsedThisTurn = 0.
+   * 4. If debt chips owed (Points 4 & 5):
+   *    - Keeps drawn cards separate (unmixed with hand).
+   *    - If Bot: settles automatically (1 chip = 1 play used; 2 chips = 2 plays used).
+   *    - If Human: sets room.gameState.pendingDebtSettlement for the player to choose.
    */
   static startTurnDraw(room: Room, playerId: string): void {
     const player = room.players.find((p) => p.id === playerId);
-    if (!player) return;
+    if (!player || !room.gameState) return;
 
     const cardsToDraw = player.hand.length === 0 ? 5 : 2;
-    const drawn = GameEngine.drawCards(room, playerId, cardsToDraw);
+    const drawn = GameEngine.drawCardsRaw(room, cardsToDraw);
 
-    GameEngine.addLog(
-      room,
-      playerId,
-      'DRAW_CARDS',
-      `${player.displayName} drew ${drawn.length} cards at turn start.`
-    );
+    // Find all debt chips owned by this player that are currently held by opponents
+    const owedChips: { chip: DebtChip; creditor: Player }[] = [];
+    room.players.forEach((other) => {
+      if (other.id !== playerId) {
+        other.debtChips.forEach((chip) => {
+          if (chip.ownerId === playerId) {
+            owedChips.push({ chip, creditor: other });
+          }
+        });
+      }
+    });
+
+    // Point 4: The person who has my debt chip first will get the priority of getting the card from me (FIFO)
+    owedChips.sort((a, b) => (a.chip.acquiredAt || 0) - (b.chip.acquiredAt || 0));
+
+    if (owedChips.length === 0) {
+      // No debt chips owed! Both drawn cards go straight into hand
+      player.hand.push(...drawn);
+      room.gameState.pendingDebtSettlement = null;
+      room.gameState.playsUsedThisTurn = 0;
+      GameEngine.addLog(
+        room,
+        playerId,
+        'DRAW_CARDS',
+        `${player.displayName} drew ${drawn.length} cards at turn start.`
+      );
+      return;
+    }
+
+    // Point 5: Player owes Debt Chips!
+    if (player.isBot) {
+      if (owedChips.length === 1) {
+        // Give 1 card to priority creditor, keep 1 card in hand, uses 1 play (2 shots left)
+        const givenCard = drawn[0].cashValue <= drawn[1].cashValue ? drawn[0] : drawn[1];
+        const keptCard = givenCard === drawn[0] ? drawn[1] : drawn[0];
+        const creditor = owedChips[0].creditor;
+
+        GameEngine.giveCardToCreditor(creditor, givenCard);
+
+        const cIdx = creditor.debtChips.findIndex((c) => c.id === owedChips[0].chip.id);
+        if (cIdx !== -1) {
+          const [chip] = creditor.debtChips.splice(cIdx, 1);
+          chip.currentHolderId = player.id;
+          player.debtChips.push(chip);
+        }
+
+        player.hand.push(keptCard);
+        room.gameState.playsUsedThisTurn = 1; // 1 shot done, 2 shots left
+        room.gameState.pendingDebtSettlement = null;
+
+        GameEngine.addLog(
+          room,
+          playerId,
+          'DEBT_RECOVERED',
+          `🪙 ${player.displayName} gave drawn card ${givenCard.name} to ${creditor.displayName} (first priority) and reclaimed their Debt Chip! (1 shot used, 2 shots left).`
+        );
+      } else {
+        // 2 or more chips owed: both drawn cards used, both chips reclaimed, uses 2 plays (1 shot left)
+        const c1 = owedChips[0].creditor;
+        const c2 = owedChips[1].creditor;
+
+        GameEngine.giveCardToCreditor(c1, drawn[0]);
+        GameEngine.giveCardToCreditor(c2, drawn[1]);
+
+        const idx1 = c1.debtChips.findIndex((c) => c.id === owedChips[0].chip.id);
+        if (idx1 !== -1) {
+          const [chip1] = c1.debtChips.splice(idx1, 1);
+          chip1.currentHolderId = player.id;
+          player.debtChips.push(chip1);
+        }
+        const idx2 = c2.debtChips.findIndex((c) => c.id === owedChips[1].chip.id);
+        if (idx2 !== -1) {
+          const [chip2] = c2.debtChips.splice(idx2, 1);
+          chip2.currentHolderId = player.id;
+          player.debtChips.push(chip2);
+        }
+
+        room.gameState.playsUsedThisTurn = 2; // 2 shots done, 1 shot left
+        room.gameState.pendingDebtSettlement = null;
+
+        GameEngine.addLog(
+          room,
+          playerId,
+          'DEBT_RECOVERED',
+          `🪙 ${player.displayName} surrendered both drawn cards to ${c1.displayName} and ${c2.displayName} to reclaim 2 Debt Chips! (2 shots used, 1 shot left).`
+        );
+      }
+    } else {
+      // Human player: staged settlement (cards not mixed into hand yet!)
+      room.gameState.pendingDebtSettlement = {
+        playerId,
+        drawnCards: drawn,
+        creditorIds: owedChips.map((o) => o.creditor.id),
+      };
+      room.gameState.playsUsedThisTurn = 0;
+      GameEngine.addLog(
+        room,
+        playerId,
+        'DRAW_DEBT_STAGED',
+        `🪙 ${player.displayName} drew 2 cards and must settle debt before cards enter hand.`
+      );
+    }
+  }
+
+  /**
+   * Resolves human player's choice of which drawn card to give to recover their Debt Chip(s).
+   */
+  static resolveDebtDraw(
+    room: Room,
+    playerId: string,
+    chosenCardId: string
+  ): { success: boolean; error?: string } {
+    if (!room.gameState || room.gameState.isGameOver) {
+      return { success: false, error: 'Game is not active' };
+    }
+    const pending = room.gameState.pendingDebtSettlement;
+    if (!pending || pending.playerId !== playerId) {
+      return { success: false, error: 'No pending debt settlement for this player' };
+    }
+
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) return { success: false, error: 'Player not found' };
+
+    // Find owed chips in priority order (Point 4)
+    const owedChips: { chip: DebtChip; creditor: Player }[] = [];
+    room.players.forEach((other) => {
+      if (other.id !== playerId) {
+        other.debtChips.forEach((chip) => {
+          if (chip.ownerId === playerId) {
+            owedChips.push({ chip, creditor: other });
+          }
+        });
+      }
+    });
+    owedChips.sort((a, b) => (a.chip.acquiredAt || 0) - (b.chip.acquiredAt || 0));
+
+    if (owedChips.length === 0) {
+      player.hand.push(...pending.drawnCards);
+      room.gameState.pendingDebtSettlement = null;
+      return { success: true };
+    }
+
+    const drawn = pending.drawnCards;
+    if (owedChips.length === 1) {
+      const givenIndex = drawn.findIndex((c) => c.id === chosenCardId);
+      const givenCard = givenIndex !== -1 ? drawn.splice(givenIndex, 1)[0] : drawn.shift()!;
+      const keptCard = drawn[0];
+      const creditor = owedChips[0].creditor;
+
+      // Transfer given card to creditor
+      GameEngine.giveCardToCreditor(creditor, givenCard);
+
+      // Reclaim debt chip
+      const cIdx = creditor.debtChips.findIndex((c) => c.id === owedChips[0].chip.id);
+      if (cIdx !== -1) {
+        const [chip] = creditor.debtChips.splice(cIdx, 1);
+        chip.currentHolderId = player.id;
+        player.debtChips.push(chip);
+      }
+
+      // Add kept card to hand
+      if (keptCard) {
+        player.hand.push(keptCard);
+      }
+
+      // Point 5: 1 shot is done, 2 shots left
+      room.gameState.playsUsedThisTurn = 1;
+      room.gameState.pendingDebtSettlement = null;
+
+      GameEngine.addLog(
+        room,
+        playerId,
+        'DEBT_RECOVERED',
+        `🪙 ${player.displayName} gave drawn card ${givenCard.name} to ${creditor.displayName} (first priority) to reclaim their Debt Chip! (1 shot used, 2 shots left).`
+      );
+    } else {
+      // 2 or more chips owed: both drawn cards surrendered to reclaim 2 chips
+      const c1 = owedChips[0].creditor;
+      const c2 = owedChips[1].creditor;
+      const card1 = drawn[0];
+      const card2 = drawn[1];
+
+      if (card1) GameEngine.giveCardToCreditor(c1, card1);
+      if (card2) GameEngine.giveCardToCreditor(c2, card2);
+
+      const idx1 = c1.debtChips.findIndex((c) => c.id === owedChips[0].chip.id);
+      if (idx1 !== -1) {
+        const [chip1] = c1.debtChips.splice(idx1, 1);
+        chip1.currentHolderId = player.id;
+        player.debtChips.push(chip1);
+      }
+      const idx2 = c2.debtChips.findIndex((c) => c.id === owedChips[1].chip.id);
+      if (idx2 !== -1) {
+        const [chip2] = c2.debtChips.splice(idx2, 1);
+        chip2.currentHolderId = player.id;
+        player.debtChips.push(chip2);
+      }
+
+      // Point 5: 2 shots are done, 1 shot left
+      room.gameState.playsUsedThisTurn = 2;
+      room.gameState.pendingDebtSettlement = null;
+
+      GameEngine.addLog(
+        room,
+        playerId,
+        'DEBT_RECOVERED',
+        `🪙 ${player.displayName} surrendered both drawn cards to ${c1.displayName} and ${c2.displayName} to reclaim 2 Debt Chips! (2 shots used, 1 shot left).`
+      );
+    }
+
+    GameEngine.checkAndBroadcastWin(room, player);
+    return { success: true };
   }
 
   /**
@@ -266,10 +517,33 @@ export class GameEngine {
       }
 
       switch (card.actionType) {
+        case ActionType.PASS_GO_GO_GO:
         case ActionType.PASS_GO: {
-          GameEngine.drawCards(room, playerId, 2);
-          GameEngine.addLog(room, playerId, 'PLAY_PASS_GO', `${player.displayName} played Pass Go and drew 2 cards!`);
+          // Point 3: pick card from the deck until i have 7 cards in my hands
+          const countToDraw = Math.max(0, 7 - player.hand.length);
+          const drawn = countToDraw > 0 ? GameEngine.drawCards(room, playerId, countToDraw) : [];
+          GameEngine.addLog(
+            room,
+            playerId,
+            'PLAY_PASS_GO_GO_GO',
+            `🚀 ${player.displayName} played ${card.name} and drew ${drawn.length} card${drawn.length !== 1 ? 's' : ''} to refill their hand to 7 cards!`
+          );
           break;
+        }
+
+        case ActionType.GO_AGAIN: {
+          // Point 2: current 3 plays considered and player gets another turn: picks 2 cards, plays 3 plays at that moment
+          const drawn = GameEngine.drawCards(room, playerId, 2);
+          room.gameState.playsUsedThisTurn = 0; // resets to 0 so player has 3 fresh plays!
+          room.gameState.turnNumber++;
+          GameEngine.addLog(
+            room,
+            playerId,
+            'PLAY_GO_AGAIN',
+            `⚡ ${player.displayName} played GO AGAIN! Drew 2 fresh cards and gets another full turn with 3 fresh plays!`
+          );
+          GameEngine.checkAndBroadcastWin(room, player);
+          return { success: true };
         }
 
         case ActionType.SLY_DEAL: {
@@ -408,6 +682,7 @@ export class GameEngine {
             if (collected < 5 && targetOpponent.debtChips.length > 0) {
               const chip = targetOpponent.debtChips.pop()!;
               chip.currentHolderId = player.id;
+              chip.acquiredAt = Date.now();
               player.debtChips.push(chip);
               GameEngine.addLog(
                 room,
@@ -435,6 +710,17 @@ export class GameEngine {
                 const b = other.bank.pop()!;
                 totalCollected += b.cashValue;
                 player.bank.push(b);
+              } else if (other.debtChips.length > 0) {
+                const chip = other.debtChips.pop()!;
+                chip.currentHolderId = player.id;
+                chip.acquiredAt = Date.now();
+                player.debtChips.push(chip);
+                GameEngine.addLog(
+                  room,
+                  other.id,
+                  'DEBT_CHIP_SURRENDER',
+                  `🪙 ${other.displayName} could not pay $2M Birthday demand and surrendered a Debt Chip to ${player.displayName}!`
+                );
               }
             }
           });
@@ -533,6 +819,7 @@ export class GameEngine {
                 // Surrender a Debt Chip if bank is empty
                 const chip = tgt.debtChips.pop()!;
                 chip.currentHolderId = player.id;
+                chip.acquiredAt = Date.now();
                 player.debtChips.push(chip);
                 GameEngine.addLog(room, tgt.id, 'DEBT_CHIP_SURRENDER', `🪙 ${tgt.displayName} had no cash to pay rent and surrendered a Debt Chip to ${player.displayName}!`);
               }
