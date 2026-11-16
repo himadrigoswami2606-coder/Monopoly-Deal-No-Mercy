@@ -304,89 +304,25 @@ export function createDeck(): Card[] {
   deck.push(createWildcard('wild-rainbow-2', 'Rainbow Wildcard', 0, allColors, true));
 
   // ==========================================
-  // 3. MONEY CARDS (20 total)
+  // 3. MONEY CARDS (18 total - High bills: $15M, $10M + 16 smaller bills)
   // ==========================================
+  deck.push(createMoneyCard('money-15m-1', 15)); // $15M (x1) - Highest bill in No Mercy
+  deck.push(createMoneyCard('money-10m-1', 10)); // $10M (x1)
 
-  // $1M (x6)
-  for (let i = 1; i <= 6; i++) {
-    deck.push(createMoneyCard(`money-1m-${i}`, 1));
-  }
-  // $2M (x5)
-  for (let i = 1; i <= 5; i++) {
-    deck.push(createMoneyCard(`money-2m-${i}`, 2));
-  }
-  // $3M (x3)
-  for (let i = 1; i <= 3; i++) {
-    deck.push(createMoneyCard(`money-3m-${i}`, 3));
-  }
-  // $4M (x3)
-  for (let i = 1; i <= 3; i++) {
-    deck.push(createMoneyCard(`money-4m-${i}`, 4));
-  }
   // $5M (x2)
-  for (let i = 1; i <= 2; i++) {
-    deck.push(createMoneyCard(`money-5m-${i}`, 5));
-  }
-  // $10M (x1)
-  deck.push(createMoneyCard('money-10m-1', 10));
+  for (let i = 1; i <= 2; i++) deck.push(createMoneyCard(`money-5m-${i}`, 5));
+  // $4M (x2)
+  for (let i = 1; i <= 2; i++) deck.push(createMoneyCard(`money-4m-${i}`, 4));
+  // $3M (x3)
+  for (let i = 1; i <= 3; i++) deck.push(createMoneyCard(`money-3m-${i}`, 3));
+  // $2M (x4)
+  for (let i = 1; i <= 4; i++) deck.push(createMoneyCard(`money-2m-${i}`, 2));
+  // $1M (x5)
+  for (let i = 1; i <= 5; i++) deck.push(createMoneyCard(`money-1m-${i}`, 1));
 
   // ==========================================
-  // 4. ACTION & BUILDING CARDS (53 total)
+  // 4. RENT & DOUBLE RENT CARDS (16 total)
   // ==========================================
-
-  // Pass Go, Go, Go! (x4, $1M) — Draw until 7 cards in hand (No Mercy Rule)
-  for (let i = 1; i <= 4; i++) {
-    deck.push(
-      createActionCard(
-        `action-passgogogo-${i}`,
-        'Pass Go, Go, Go!',
-        ActionType.PASS_GO_GO_GO,
-        1,
-        'Draw cards from the draw pile until you hold 7 cards in your hand!'
-      )
-    );
-  }
-
-  // Pass Go (x4, $1M) — Refills hand up to 7 cards
-  for (let i = 1; i <= 4; i++) {
-    deck.push(
-      createActionCard(
-        `action-passgo-${i}`,
-        'Pass Go',
-        ActionType.PASS_GO,
-        1,
-        'Draw cards from the draw pile until you hold 7 cards in your hand!'
-      )
-    );
-  }
-
-  // Go Again (x3, $2M) — Take another full turn immediately! (No Mercy Action)
-  for (let i = 1; i <= 3; i++) {
-    deck.push(
-      createActionCard(
-        `action-goagain-${i}`,
-        'Go Again',
-        ActionType.GO_AGAIN,
-        2,
-        'Take another full turn immediately! Draw 2 new cards and get 3 fresh card plays.'
-      )
-    );
-  }
-
-  // Double the Rent (x2, $1M) — Doubles rent charged
-  for (let i = 1; i <= 2; i++) {
-    deck.push(
-      createActionCard(
-        `action-doublerent-${i}`,
-        'Double the Rent',
-        ActionType.DOUBLE_THE_RENT,
-        1,
-        'Doubles the rent charged with a Rent card. Stackable!'
-      )
-    );
-  }
-
-  // Dual-Color Rent Cards (x10 total, $1M each affecting all players)
   const rentPairs: [PropertyColor, PropertyColor, string][] = [
     [PropertyColor.BROWN, PropertyColor.LIGHT_BLUE, 'Brown / Light Blue'],
     [PropertyColor.PINK, PropertyColor.ORANGE, 'Pink / Orange'],
@@ -395,28 +331,42 @@ export function createDeck(): Card[] {
     [PropertyColor.RAILROAD, PropertyColor.UTILITY, 'Railroad / Utility'],
   ];
 
+  // 4A. 5 Dual-Color Rent Cards (1x each pair, $1M cash value)
   rentPairs.forEach(([c1, c2, label]) => {
-    for (let i = 1; i <= 2; i++) {
-      const code = `${c1.toLowerCase()}-${c2.toLowerCase()}`;
-      deck.push(
-        createActionCard(
-          `action-rent-${code}-${i}`,
-          `${label} Rent`,
-          ActionType.RENT,
-          1,
-          `All players pay you rent for properties you own in ${label}.`,
-          { rentColors: [c1, c2] }
-        )
-      );
-    }
+    const code = `${c1.toLowerCase()}-${c2.toLowerCase()}`;
+    deck.push(
+      createActionCard(
+        `action-rent-${code}`,
+        `${label} Rent`,
+        ActionType.RENT,
+        1,
+        `All players pay you rent for properties you own in ${label}.`,
+        { rentColors: [c1, c2] }
+      )
+    );
   });
 
-  // Wild Multi-Color Rent (x3 total, $3M each affecting 1 chosen player)
+  // 4B. 5 Dual-Color Double Rent Cards (1x each pair, $1M cash value, charges 2x rent)
+  rentPairs.forEach(([c1, c2, label]) => {
+    const code = `${c1.toLowerCase()}-${c2.toLowerCase()}`;
+    deck.push(
+      createActionCard(
+        `action-doublerent-${code}`,
+        `${label} Double Rent`,
+        ActionType.DOUBLE_THE_RENT,
+        1,
+        `All players pay you DOUBLE rent for properties you own in ${label}.`,
+        { rentColors: [c1, c2] }
+      )
+    );
+  });
+
+  // 4C. 3 Rent Any Color (Wild Rent, $3M cash value, targets 1 player)
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
         `action-rent-wild-${i}`,
-        'Wild Rent',
+        'Rent Any Color',
         ActionType.RENT,
         3,
         'Charge 1 chosen player rent for any property color you own.',
@@ -425,85 +375,38 @@ export function createDeck(): Card[] {
     );
   }
 
-  // Shack (x3, $3M) — Official No Mercy building card (+ $3M rent on any property or set!)
+  // 4D. 3 Double Rent Any Color (Wild Double Rent, $3M cash value, targets 1 player for 2x rent)
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
-        `action-shack-${i}`,
-        'Shack',
-        ActionType.SHACK,
+        `action-doublerent-wild-${i}`,
+        'Double Rent Any Color',
+        ActionType.DOUBLE_THE_RENT,
         3,
-        'Place on any property in your collection (single, incomplete, or complete) for +$3M rent!'
+        'Charge 1 chosen player DOUBLE rent for any property color you own.',
+        { isWildRent: true, rentColors: allColors }
       )
     );
   }
 
-  // Hotel (x2, $4M) — +$4M rent to complete set with House
-  for (let i = 1; i <= 2; i++) {
-    deck.push(
-      createActionCard(
-        `action-hotel-${i}`,
-        'Hotel',
-        ActionType.HOTEL,
-        4,
-        'Adds +$4M rent to any complete property set that already has a House.'
-      )
-    );
-  }
+  // ==========================================
+  // 5. ACTION CARDS (42 total)
+  // ==========================================
 
-  // Just Say No (x3, $4M) — Cancels any action played against you
+  // 3 Deal Breaker ($3M) - Steal 1 complete set from any player (including attached Shack)
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
-        `action-justsayno-${i}`,
-        'Just Say No',
-        ActionType.JUST_SAY_NO,
-        4,
-        'Cancels any action card played against you! Can be countered by another Just Say No.'
-      )
-    );
-  }
-
-  // Super Sly Deal (x2, $3M) — Steal a complete property set
-  for (let i = 1; i <= 2; i++) {
-    deck.push(
-      createActionCard(
-        `action-superslydeal-${i}`,
-        'Super Sly Deal',
-        ActionType.SUPER_SLY_DEAL,
+        `action-dealbreaker-${i}`,
+        'Deal Breaker',
+        ActionType.DEAL_BREAKER,
         3,
-        'Steal an entire complete property set (including attached Houses/Hotels) from an opponent!'
+        'Steal 1 complete property set from any player (including any attached Shack)!'
       )
     );
   }
 
-  // Sly Deal (x3, $3M) — Steal 1 single property card
-  for (let i = 1; i <= 3; i++) {
-    deck.push(
-      createActionCard(
-        `action-slydeal-${i}`,
-        'Sly Deal',
-        ActionType.SLY_DEAL,
-        3,
-        'Steal 1 single property card from an opponent (cannot be from a complete set).'
-      )
-    );
-  }
-
-  // Forced Deal (x3, $3M) — Swap 1 of your properties with 1 opponent property
-  for (let i = 1; i <= 3; i++) {
-    deck.push(
-      createActionCard(
-        `action-forceddeal-${i}`,
-        'Forced Deal',
-        ActionType.FORCED_DEAL,
-        3,
-        'Swap 1 of your property cards with 1 opponent property card (neither can be from a complete set).'
-      )
-    );
-  }
-
-  // Forced Debt (x3, $3M) — Official No Mercy card: Choose 1 player and take 1 Debt Chip!
+  // 3 Forced Debt ($3M) - Take 1 Debt Chip from chosen player
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
@@ -516,54 +419,158 @@ export function createDeck(): Card[] {
     );
   }
 
-  // It's My Birthday (x3, $2M) — Force all other players to pay you $2M each
+  // 3 Go Again ($2M) - Draw 2 cards and take another full turn
   for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
-        `action-birthday-${i}`,
-        "It's My Birthday",
-        ActionType.ITS_MY_BIRTHDAY,
+        `action-goagain-${i}`,
+        'Go Again',
+        ActionType.GO_AGAIN,
         2,
-        'All other players must pay you $2M each in cash or properties.'
+        'Draw 2 fresh cards and take another full turn with 3 fresh plays!'
       )
     );
   }
 
-  // Yoink! (x2, $2M) — Steal up to $10M in cash directly from 1 opponent's Bank
+  // 3 Heist ($3M) - Steal any 1 card from every other player's Bank
+  for (let i = 1; i <= 3; i++) {
+    deck.push(
+      createActionCard(
+        `action-heist-${i}`,
+        'Heist',
+        ActionType.HEIST,
+        3,
+        "Choose and steal any 1 card from every other player's Bank directly into your own Bank! (Empty banks give nothing and do not owe debt chips)"
+      )
+    );
+  }
+
+  // 5 Just Say No ($4M) - Cancel any action played against you
+  for (let i = 1; i <= 5; i++) {
+    deck.push(
+      createActionCard(
+        `action-justsayno-${i}`,
+        'Just Say No',
+        ActionType.JUST_SAY_NO,
+        4,
+        'Cancels any action card played against you! Can be countered by another Just Say No.'
+      )
+    );
+  }
+
+  // 3 Market Crash ($4M) - Steal 1 property card from every other player (including from complete sets)
+  for (let i = 1; i <= 3; i++) {
+    deck.push(
+      createActionCard(
+        `action-marketcrash-${i}`,
+        'Market Crash',
+        ActionType.MARKET_CRASH,
+        4,
+        "Choose and steal 1 property from every other player's collection on the table, even from complete sets! (Any attached Shack moves with the stolen property)"
+      )
+    );
+  }
+
+  // 4 Pass Go, Go Go! ($1M) - Draw until you hold 7 cards in hand
+  for (let i = 1; i <= 4; i++) {
+    deck.push(
+      createActionCard(
+        `action-passgogogo-${i}`,
+        'Pass Go, Go Go!',
+        ActionType.PASS_GO_GO_GO,
+        1,
+        'Draw cards from the draw pile until you hold 7 cards in your hand!'
+      )
+    );
+  }
+
+  // 2 Repossession ($4M) - Target 1 player: keeps 1 property, gives rest to other players
   for (let i = 1; i <= 2; i++) {
+    deck.push(
+      createActionCard(
+        `action-repossess-${i}`,
+        'Repossession',
+        ActionType.REPOSSESS,
+        4,
+        'Force 1 player to keep only 1 property card, and distribute all their other properties to the rest of the players!'
+      )
+    );
+  }
+
+  // 3 Shack ($3M) - Place on any property for +$3M rent (costs 1 play to place or move)
+  for (let i = 1; i <= 3; i++) {
+    deck.push(
+      createActionCard(
+        `action-shack-${i}`,
+        'Shack',
+        ActionType.SHACK,
+        3,
+        'Place on any property in your collection for +$3M rent! Can be moved to another property for 1 play.'
+      )
+    );
+  }
+
+  // 3 Super Sly Deal ($3M) - Steal all properties of 1 color from every opponent
+  for (let i = 1; i <= 3; i++) {
+    deck.push(
+      createActionCard(
+        `action-superslydeal-${i}`,
+        'Super Sly Deal',
+        ActionType.SUPER_SLY_DEAL,
+        3,
+        'Choose a color and steal ALL properties of that color from every opponent (including complete sets)!'
+      )
+    );
+  }
+
+  // 2 Tax Collector ($3M) - Target 1 player: keeps 1 bank card, gives rest to other players
+  for (let i = 1; i <= 2; i++) {
+    deck.push(
+      createActionCard(
+        `action-taxcollector-${i}`,
+        'Tax Collector',
+        ActionType.TAX_COLLECTOR,
+        3,
+        'Force 1 player to keep only 1 card in their Bank, and distribute all their other bank cards to the rest of the players!'
+      )
+    );
+  }
+
+  // 3 Tough Luck ($2M) - Target 1 player & category: they give you all cards of that category from hand
+  for (let i = 1; i <= 3; i++) {
+    deck.push(
+      createActionCard(
+        `action-toughluck-${i}`,
+        'Tough Luck',
+        ActionType.TOUGH_LUCK,
+        2,
+        'Choose 1 opponent and a card type (Money, Property, or Action). They must give you all cards of that type from their hand!'
+      )
+    );
+  }
+
+  // 2 Unfair Trade ($4M) - Swap your entire bank with an opponent's bank
+  for (let i = 1; i <= 2; i++) {
+    deck.push(
+      createActionCard(
+        `action-unfairtrade-${i}`,
+        'Unfair Trade',
+        ActionType.UNFAIR_TRADE,
+        4,
+        "Swap your entire Bank with 1 opponent's Bank! (Your Bank must have at least 1 card to play this card)"
+      )
+    );
+  }
+
+  // 3 Yoink! ($2M) - Demand $10M cash from chosen player
+  for (let i = 1; i <= 3; i++) {
     deck.push(
       createActionCard(
         `action-yoink-${i}`,
         'Yoink!',
         ActionType.YOINK,
         2,
-        "Steal up to $10M in cash directly from 1 opponent's Bank!"
-      )
-    );
-  }
-
-  // Repossess (x2, $4M) — Force 1 opponent to give you all properties except 1
-  for (let i = 1; i <= 2; i++) {
-    deck.push(
-      createActionCard(
-        `action-repossess-${i}`,
-        'Repossess',
-        ActionType.REPOSSESS,
-        4,
-        'Force 1 opponent to surrender ALL of their properties to you, except 1 of their choice!'
-      )
-    );
-  }
-
-  // Tough Luck (x2, $3M) — Choose 1 opponent and a category; discard all cards of that type from hand
-  for (let i = 1; i <= 2; i++) {
-    deck.push(
-      createActionCard(
-        `action-toughluck-${i}`,
-        'Tough Luck',
-        ActionType.TOUGH_LUCK,
-        3,
-        'Choose 1 opponent and a category (Money, Property, or Action). They must discard all cards of that type from their hand!'
+        "Demand $10M from 1 chosen player! (If they can't pay in full, they pay what they can and give you a Debt Chip)"
       )
     );
   }
@@ -585,5 +592,5 @@ export function shuffleDeck(deck: Card[]): Card[] {
   return shuffled;
 }
 
-/** Total card count in a fresh deck (112 cards). */
-export const DECK_SIZE = 112;
+/** Total card count in a fresh deck (115 cards). */
+export const DECK_SIZE = 115;

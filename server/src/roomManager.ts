@@ -36,6 +36,7 @@ import {
   EVENT_RESPOND_JUST_SAY_NO,
   EVENT_SUBMIT_PAYMENT,
   EVENT_SUBMIT_REPOSSESS,
+  EVENT_SUBMIT_TAX_COLLECTOR,
   EVENT_MOVE_SHACK,
   PropertyColor,
 } from '../../shared/types';
@@ -165,6 +166,17 @@ function triggerBotReactionIfPending(io: SocketIOServer, room: Room): void {
       }));
       GameEngine.submitRepossess(room, bot.id, pending.id, keepCard?.id || '', distributions);
       broadcastGameState(io, room);
+    } else if (pending.status === 'AWAITING_TAX_COLLECTOR') {
+      const bankCards = [...bot.bank].sort((a, b) => b.cashValue - a.cashValue);
+      const keepCard = bankCards[0];
+      const otherCards = bankCards.slice(1);
+      const otherPlayers = room.players.filter((p) => p.id !== bot.id);
+      const distributions = otherCards.map((c, idx) => ({
+        cardId: c.id,
+        targetPlayerId: otherPlayers[idx % otherPlayers.length].id,
+      }));
+      GameEngine.submitTaxCollector(room, bot.id, pending.id, keepCard?.id || '', distributions);
+      broadcastGameState(io, room);
     }
   }, 750);
 }
@@ -188,7 +200,25 @@ function chooseBotCardPlay(room: Room, bot: Player): {
   const hand = bot.hand;
   if (hand.length === 0) return null;
 
-  // 1. Super Sly Deal: Steal an entire complete set from an opponent!
+  // 1. Super Sly Deal & Deal Breaker: Steal complete sets!
+  const dealBreakerCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.DEAL_BREAKER
+  );
+  if (dealBreakerCard) {
+    for (const opp of opponents) {
+      const completeSet = opp.properties.find((s) => s.isComplete);
+      if (completeSet) {
+        return {
+          cardId: dealBreakerCard.id,
+          options: {
+            targetPlayerId: opp.id,
+            targetColor: completeSet.color,
+          },
+        };
+      }
+    }
+  }
+
   const superSlyCard = hand.find(
     (c) => c.type === CardType.ACTION && c.actionType === ActionType.SUPER_SLY_DEAL
   );
@@ -205,6 +235,14 @@ function chooseBotCardPlay(room: Room, bot: Player): {
         };
       }
     }
+  }
+
+  // 1B. Market Crash: Dismantle properties across all opponents!
+  const marketCrashCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.MARKET_CRASH
+  );
+  if (marketCrashCard && opponents.some((o) => o.properties.some((s) => s.cards.length > 0))) {
+    return { cardId: marketCrashCard.id };
   }
 
   // 2. Pass Go / Pass Go, Go, Go!: Refills hand up to 7 cards (Point 3)
@@ -292,6 +330,41 @@ function chooseBotCardPlay(room: Room, bot: Player): {
         cardId: yoinkCard.id,
         options: { targetPlayerId: richestOpp.id },
       };
+    }
+  }
+
+  // 5B. Heist: Raid every opponent's bank!
+  const heistCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.HEIST
+  );
+  if (heistCard && opponents.some((o) => o.bank.length > 0)) {
+    return { cardId: heistCard.id };
+  }
+
+  // 5C. Unfair Trade: Swap entire bank if bot has bank cards and opponent is richer!
+  const unfairTradeCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.UNFAIR_TRADE
+  );
+  if (unfairTradeCard && bot.bank.length > 0) {
+    const botBankVal = bot.bank.reduce((sum, c) => sum + c.cashValue, 0);
+    const richerOpp = opponents
+      .filter((o) => o.bank.reduce((sum, c) => sum + c.cashValue, 0) > botBankVal)
+      .sort((a, b) => b.bank.reduce((sum, c) => sum + c.cashValue, 0) - a.bank.reduce((sum, c) => sum + c.cashValue, 0))[0];
+    if (richerOpp) {
+      return { cardId: unfairTradeCard.id, options: { targetPlayerId: richerOpp.id } };
+    }
+  }
+
+  // 5D. Tax Collector: Force richest opponent to distribute their bank!
+  const taxCollectorCard = hand.find(
+    (c) => c.type === CardType.ACTION && c.actionType === ActionType.TAX_COLLECTOR
+  );
+  if (taxCollectorCard) {
+    const richestWithBank = opponents
+      .filter((o) => o.bank.length > 1)
+      .sort((a, b) => b.bank.reduce((sum, c) => sum + c.cashValue, 0) - a.bank.reduce((sum, c) => sum + c.cashValue, 0))[0];
+    if (richestWithBank) {
+      return { cardId: taxCollectorCard.id, options: { targetPlayerId: richestWithBank.id } };
     }
   }
 
@@ -954,6 +1027,45 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       );
       if (!result.success) {
         socket.emit(EVENT_ERROR, { message: result.error || 'Cannot submit repossession' });
+        return;
+      }
+
+      broadcastGameState(io, room);
+    }
+  );
+
+  // -------------------------------------------------------------------------
+  // 8G. SUBMIT TAX COLLECTOR (Official No Mercy Rule)
+  // -------------------------------------------------------------------------
+  socket.on(
+    EVENT_SUBMIT_TAX_COLLECTOR,
+    (data: {
+      actionId?: string;
+      keepCardId?: string;
+      distributions?: { cardId: string; targetPlayerId: string }[];
+    }) => {
+      const roomCode = socketToRoomCode.get(socket.id);
+      const playerId = socketToPlayerId.get(socket.id);
+      if (!roomCode || !playerId) return;
+
+      const room = rooms.get(roomCode);
+      if (!room || !room.gameState) return;
+
+      const actionId = data?.actionId || room.gameState.pendingAction?.id;
+      if (!actionId || !data?.keepCardId) {
+        socket.emit(EVENT_ERROR, { message: 'No active tax collector action found' });
+        return;
+      }
+
+      const result = GameEngine.submitTaxCollector(
+        room,
+        playerId,
+        actionId,
+        data.keepCardId,
+        data.distributions || []
+      );
+      if (!result.success) {
+        socket.emit(EVENT_ERROR, { message: result.error || 'Cannot submit tax collector' });
         return;
       }
 

@@ -51,6 +51,11 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
   const isYoink = card.actionType === ActionType.YOINK;
   const isRepossess = card.actionType === ActionType.REPOSSESS;
   const isToughLuck = card.actionType === ActionType.TOUGH_LUCK;
+  const isDealBreaker = card.actionType === ActionType.DEAL_BREAKER;
+  const isHeist = card.actionType === ActionType.HEIST;
+  const isMarketCrash = card.actionType === ActionType.MARKET_CRASH;
+  const isTaxCollector = card.actionType === ActionType.TAX_COLLECTOR;
+  const isUnfairTrade = card.actionType === ActionType.UNFAIR_TRADE;
   const isHouseOrHotel =
     card.actionType === ActionType.HOUSE ||
     card.actionType === ActionType.HOTEL ||
@@ -67,8 +72,20 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
 
   // Incomplete property sets of opponent (for Sly Deal & Forced Deal)
   const incompleteOpponentSets = selectedOpponent?.properties.filter((s) => !s.isComplete) || [];
-  // Complete sets of opponent (for Super Sly Deal)
+  // Complete sets of opponent (for Super Sly Deal & Deal Breaker)
   const completeOpponentSets = selectedOpponent?.properties.filter((s) => s.isComplete) || [];
+
+  const needsOpponentPicker =
+    isSlyDeal ||
+    isSuperSlyDeal ||
+    isForcedDeal ||
+    isDebtCollector ||
+    isYoink ||
+    isRepossess ||
+    isToughLuck ||
+    isDealBreaker ||
+    isTaxCollector ||
+    isUnfairTrade;
 
   const handleConfirm = () => {
     onConfirm({
@@ -104,7 +121,7 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
         </p>
 
         {/* 1. Opponent Picker (if targeted action) */}
-        {(isSlyDeal || isSuperSlyDeal || isForcedDeal || isDebtCollector || isYoink || isRepossess || isToughLuck) && (
+        {needsOpponentPicker && (
           <div className="mb-4">
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
               Select Target Opponent:
@@ -257,6 +274,112 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
                   </button>
                 ))}
               </div>
+            )}
+          </div>
+        )}
+
+        {/* 3B. Deal Breaker: Steal 1 complete property set */}
+        {isDealBreaker && (
+          <div className="mb-4">
+            <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
+              Choose Complete Set to Steal:
+            </label>
+            {completeOpponentSets.length === 0 ? (
+              <div className="text-xs text-rose-400 p-3 bg-rose-500/10 rounded-xl border border-rose-500/30">
+                {selectedOpponent?.displayName} does not have any complete property sets to steal!
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-2">
+                {completeOpponentSets.map((set) => (
+                  <button
+                    key={set.color}
+                    type="button"
+                    onClick={() => setSelectedColor(set.color)}
+                    className={`p-3 rounded-xl border text-left transition-all ${
+                      selectedColor === set.color
+                        ? 'bg-amber-500/20 border-amber-400 ring-2 ring-amber-400/40'
+                        : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
+                    }`}
+                  >
+                    <div className="font-bold text-xs uppercase" style={{ color: PROPERTY_CONFIG[set.color]?.hexColor }}>
+                      {PROPERTY_CONFIG[set.color]?.name} Set ({set.cards.length} cards)
+                    </div>
+                    <div className="text-[10px] text-slate-400 mt-1">
+                      {set.shack ? '🛖 Shack ' : ''}{set.house ? '🏠 House ' : ''}{set.hotel ? '🏨 Hotel' : ''}
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 3C. Heist: Raids Every Opponent's Bank */}
+        {isHeist && (
+          <div className="mb-4 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200">
+            <div className="font-bold text-emerald-300 text-sm mb-1 flex items-center gap-1.5">
+              <span>💰</span> Raids Every Opponent's Bank!
+            </div>
+            <p>
+              Heist will steal 1 card from <strong>every other player's Bank</strong> directly into your own Bank!
+            </p>
+            <p className="mt-1.5 text-slate-400 text-[11px] leading-relaxed">
+              • Empty banks give nothing (no debt chips are taken).<br />
+              • Each opponent can play Just Say No to protect their bank.
+            </p>
+          </div>
+        )}
+
+        {/* 3D. Market Crash: Dismantles Every Opponent's Properties */}
+        {isMarketCrash && (
+          <div className="mb-4 bg-rose-950/40 border border-rose-500/30 rounded-2xl p-3 text-xs text-rose-200">
+            <div className="font-bold text-rose-300 text-sm mb-1 flex items-center gap-1.5">
+              <span>📉</span> Dismantles Every Opponent's Properties!
+            </div>
+            <p>
+              Market Crash will seize 1 property card from <strong>every other player's collection</strong> on the table into your collection!
+            </p>
+            <p className="mt-1.5 text-slate-400 text-[11px] leading-relaxed">
+              • Complete sets CAN be broken.<br />
+              • If the stolen property has a Shack attached, the Shack transfers along with it.<br />
+              • Opponents can play Just Say No to protect their properties.
+            </p>
+          </div>
+        )}
+
+        {/* 3E. Tax Collector */}
+        {isTaxCollector && (
+          <div className="mb-4 bg-amber-950/40 border border-amber-500/30 rounded-2xl p-3 text-xs text-amber-200">
+            <div className="font-bold text-amber-300 text-sm mb-1 flex items-center gap-1.5">
+              <span>🏛️</span> Tax Collector
+            </div>
+            <p>
+              Target <strong>{selectedOpponent?.displayName}</strong>. They will choose 1 card to keep in their Bank, and distribute all other Bank cards to the table!
+            </p>
+            <p className="mt-1.5 text-slate-400 text-[11px] leading-relaxed">
+              • If their Bank has 1 or 0 cards, they keep it and give away nothing (no debt chip).<br />
+              • Can be blocked with Just Say No.
+            </p>
+          </div>
+        )}
+
+        {/* 3F. Unfair Trade */}
+        {isUnfairTrade && (
+          <div className="mb-4 bg-purple-950/40 border border-purple-500/30 rounded-2xl p-3 text-xs text-purple-200">
+            <div className="font-bold text-purple-300 text-sm mb-1 flex items-center gap-1.5">
+              <span>⚖️</span> Swap Entire Banks!
+            </div>
+            <p>
+              Swap your entire Bank ({myPlayer.bank.length} cards, ${myPlayer.bank.reduce((s, c) => s + c.cashValue, 0)}M) with <strong>{selectedOpponent?.displayName}</strong>'s Bank ({selectedOpponent?.bankCards?.length || selectedOpponent?.bankCount || 0} cards, ${selectedOpponent?.bankTotal}M)!
+            </p>
+            {myPlayer.bank.length === 0 ? (
+              <div className="mt-2 text-rose-400 font-bold bg-rose-500/10 p-2.5 rounded-xl border border-rose-500/30">
+                ⚠️ Your Bank is empty! Official rule: You must have at least 1 card in your Bank to legally make an Unfair Trade.
+              </div>
+            ) : (
+              <p className="mt-1.5 text-slate-400 text-[11px] leading-relaxed">
+                • Target can block with Just Say No.
+              </p>
             )}
           </div>
         )}
@@ -441,7 +564,12 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
           <button
             type="button"
             onClick={handleConfirm}
-            className="w-2/3 py-2.5 px-4 rounded-xl font-heading font-bold text-slate-950 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-xs uppercase tracking-wider shadow-lg shadow-amber-500/20 active:scale-95"
+            disabled={isUnfairTrade && myPlayer.bank.length === 0}
+            className={`w-2/3 py-2.5 px-4 rounded-xl font-heading font-bold text-slate-950 text-xs uppercase tracking-wider shadow-lg transition-all ${
+              isUnfairTrade && myPlayer.bank.length === 0
+                ? 'bg-slate-700 text-slate-400 cursor-not-allowed opacity-50'
+                : 'bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 shadow-amber-500/20 active:scale-95'
+            }`}
           >
             Confirm & Play
           </button>

@@ -482,6 +482,14 @@ export class GameEngine {
     }
     // ── 3. ACTION CARDS ───────────────────────────────────────────────────
     else if (card.type === CardType.ACTION) {
+      // Unfair Trade rule: Attacker MUST have at least 1 card in bank to play!
+      if (card.actionType === ActionType.UNFAIR_TRADE && player.bank.length === 0) {
+        return {
+          success: false,
+          error: 'Your Bank is empty! You must have at least 1 card in your Bank to play Unfair Trade.',
+        };
+      }
+
       player.hand.splice(cardIndex, 1);
       room.gameState.discardPile.unshift(card);
 
@@ -497,6 +505,11 @@ export class GameEngine {
         ActionType.FORCED_DEAL,
         ActionType.YOINK,
         ActionType.TOUGH_LUCK,
+        ActionType.DEAL_BREAKER,
+        ActionType.HEIST,
+        ActionType.MARKET_CRASH,
+        ActionType.TAX_COLLECTOR,
+        ActionType.UNFAIR_TRADE,
       ].includes(card.actionType!);
 
       if (isTargetedAction) {
@@ -631,6 +644,23 @@ export class GameEngine {
       if (targets.length === 0 && targetOpponent) {
         targets = [targetOpponent];
       }
+    } else if (card.actionType === ActionType.HEIST) {
+      targets = room.players.filter((p) => p.id !== player.id && p.bank.length > 0);
+    } else if (card.actionType === ActionType.MARKET_CRASH) {
+      targets = room.players.filter((p) => p.id !== player.id && p.properties.some((s) => s.cards.length > 0));
+    } else if (card.actionType === ActionType.DEAL_BREAKER) {
+      if (targetOpponent && targetOpponent.properties.some((s) => s.isComplete)) {
+        targets = [targetOpponent];
+      } else {
+        const oppWithSet = room.players.find((p) => p.id !== player.id && p.properties.some((s) => s.isComplete));
+        targets = oppWithSet ? [oppWithSet] : (targetOpponent ? [targetOpponent] : []);
+      }
+    } else if (card.actionType === ActionType.TAX_COLLECTOR) {
+      targets = targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== player.id);
+      if (targets.length > 1) targets = [targets[0]];
+    } else if (card.actionType === ActionType.UNFAIR_TRADE) {
+      targets = targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== player.id);
+      if (targets.length > 1) targets = [targets[0]];
     } else {
       targets = targetOpponent ? [targetOpponent] : [];
     }
@@ -734,6 +764,83 @@ export class GameEngine {
         'REPOSSESS_INITIATED',
         `🔨 ${player.displayName} played REPOSSESS against ${firstTarget.displayName}!`
       );
+      return { success: true };
+    }
+
+    if (card.actionType === ActionType.TAX_COLLECTOR) {
+      if (firstTarget.bank.length <= 1) {
+        GameEngine.addLog(
+          room,
+          firstTarget.id,
+          'TAX_COLLECTOR_SKIP',
+          `🏛️ ${firstTarget.displayName} has only ${firstTarget.bank.length} card in their Bank, so they keep it and give away nothing (no debt chip owed).`
+        );
+        return { success: true };
+      }
+      room.gameState.pendingAction = {
+        id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+        attackerId: player.id,
+        attackerName: player.displayName,
+        card,
+        actionType: card.actionType!,
+        targetPlayerId: firstTarget.id,
+        targetPlayerIds: [firstTarget.id],
+        currentAwaitingPlayerId: firstTarget.id,
+        options,
+        justSayNoChain: [],
+        status: 'AWAITING_TAX_COLLECTOR',
+        createdAt: Date.now(),
+      };
+      GameEngine.addLog(
+        room,
+        player.id,
+        'TAX_COLLECTOR_INITIATED',
+        `🏛️ ${player.displayName} played TAX COLLECTOR against ${firstTarget.displayName}!`
+      );
+      return { success: true };
+    }
+
+    if (card.actionType === ActionType.HEIST) {
+      GameEngine.executeHeistOnTarget(room, player, firstTarget);
+      if (targets.length > 1) {
+        room.gameState.pendingAction = {
+          id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          attackerId: player.id,
+          attackerName: player.displayName,
+          card,
+          actionType: card.actionType!,
+          targetPlayerId: firstTarget.id,
+          targetPlayerIds: targets.map((t) => t.id),
+          currentAwaitingPlayerId: firstTarget.id,
+          options,
+          justSayNoChain: [],
+          status: 'AWAITING_PAYMENT',
+          createdAt: Date.now(),
+        };
+        GameEngine.advancePendingActionToNextTarget(room);
+      }
+      return { success: true };
+    }
+
+    if (card.actionType === ActionType.MARKET_CRASH) {
+      GameEngine.executeMarketCrashOnTarget(room, player, firstTarget);
+      if (targets.length > 1) {
+        room.gameState.pendingAction = {
+          id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+          attackerId: player.id,
+          attackerName: player.displayName,
+          card,
+          actionType: card.actionType!,
+          targetPlayerId: firstTarget.id,
+          targetPlayerIds: targets.map((t) => t.id),
+          currentAwaitingPlayerId: firstTarget.id,
+          options,
+          justSayNoChain: [],
+          status: 'AWAITING_PAYMENT',
+          createdAt: Date.now(),
+        };
+        GameEngine.advancePendingActionToNextTarget(room);
+      }
       return { success: true };
     }
 
@@ -943,11 +1050,72 @@ export class GameEngine {
         }
         break;
       }
+
+      case ActionType.DEAL_BREAKER: {
+        if (targetOpponent) {
+          const chosenColor = options?.targetColor as PropertyColor | undefined;
+          let targetSetIndex = -1;
+          if (chosenColor) {
+            targetSetIndex = targetOpponent.properties.findIndex(
+              (s) => s.color === chosenColor && s.isComplete
+            );
+          }
+          if (targetSetIndex === -1) {
+            targetSetIndex = targetOpponent.properties.findIndex((s) => s.isComplete);
+          }
+
+          if (targetSetIndex !== -1) {
+            const [stolenSet] = targetOpponent.properties.splice(targetSetIndex, 1);
+            let mySet = player.properties.find((s) => s.color === stolenSet.color);
+            if (!mySet) {
+              player.properties.push(stolenSet);
+            } else {
+              mySet.cards.push(...stolenSet.cards);
+              if (stolenSet.shack) mySet.shack = true;
+              if (stolenSet.house) mySet.house = true;
+              if (stolenSet.hotel) mySet.hotel = true;
+              mySet.isComplete = mySet.cards.length >= (PROPERTY_CONFIG[mySet.color]?.setSize || 3);
+            }
+            GameEngine.addLog(
+              room,
+              player.id,
+              'DEAL_BREAKER_SUCCESS',
+              `💥 DEAL BREAKER! ${player.displayName} stole the entire complete ${PROPERTY_CONFIG[stolenSet.color]?.name || stolenSet.color} set ${stolenSet.shack ? '(with Shack!) ' : ''}from ${targetOpponent.displayName}!`
+            );
+            GameEngine.checkAndBroadcastWin(room, player);
+          } else {
+            GameEngine.addLog(
+              room,
+              player.id,
+              'DEAL_BREAKER_NO_SET',
+              `${player.displayName} played Deal Breaker, but ${targetOpponent.displayName} has no complete set to steal!`
+            );
+          }
+        }
+        break;
+      }
+
+      case ActionType.UNFAIR_TRADE: {
+        if (targetOpponent) {
+          const tempBank = [...player.bank];
+          player.bank = [...targetOpponent.bank];
+          targetOpponent.bank = tempBank;
+          GameEngine.addLog(
+            room,
+            player.id,
+            'UNFAIR_TRADE_SUCCESS',
+            `⚖️ UNFAIR TRADE! ${player.displayName} swapped their entire Bank (${player.bank.length} cards) with ${targetOpponent.displayName} (${targetOpponent.bank.length} cards)!`
+          );
+          GameEngine.checkAndBroadcastWin(room, player);
+          GameEngine.checkAndBroadcastWin(room, targetOpponent);
+        }
+        break;
+      }
     }
   }
 
   /**
-   * Advances a multi-target PendingAction (Rent / Birthday) to the next target,
+   * Advances a multi-target PendingAction (Rent / Birthday / Heist / Market Crash) to the next target,
    * or clears pendingAction if all targets are resolved.
    */
   static advancePendingActionToNextTarget(room: Room): void {
@@ -955,16 +1123,61 @@ export class GameEngine {
     const pending = room.gameState.pendingAction;
     if (pending.targetPlayerIds && pending.targetPlayerIds.length > 0) {
       pending.targetPlayerIds = pending.targetPlayerIds.filter((id) => id !== pending.currentAwaitingPlayerId);
-      if (pending.targetPlayerIds.length > 0) {
+
+      while (pending.targetPlayerIds.length > 0) {
         const nextTargetId = pending.targetPlayerIds[0];
         pending.currentAwaitingPlayerId = nextTargetId;
         pending.targetPlayerId = nextTargetId;
+        pending.justSayNoChain = [];
         const nextPlayer = room.players.find((p) => p.id === nextTargetId);
-        const hasJSN = nextPlayer?.hand.some(
+        if (!nextPlayer) {
+          pending.targetPlayerIds.shift();
+          continue;
+        }
+
+        const hasJSN = nextPlayer.hand.some(
           (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
         );
-        pending.status = hasJSN ? 'AWAITING_JSN' : 'AWAITING_PAYMENT';
-        return;
+
+        if (hasJSN) {
+          pending.status = 'AWAITING_JSN';
+          return;
+        }
+
+        // No JSN for nextPlayer:
+        if (
+          pending.actionType === ActionType.RENT ||
+          pending.actionType === ActionType.DOUBLE_THE_RENT ||
+          pending.actionType === ActionType.ITS_MY_BIRTHDAY
+        ) {
+          pending.status = 'AWAITING_PAYMENT';
+          return;
+        }
+
+        if (pending.actionType === ActionType.HEIST) {
+          const attacker = room.players.find((p) => p.id === pending.attackerId);
+          if (attacker) {
+            GameEngine.executeHeistOnTarget(room, attacker, nextPlayer);
+          }
+          pending.targetPlayerIds.shift();
+          continue;
+        }
+
+        if (pending.actionType === ActionType.MARKET_CRASH) {
+          const attacker = room.players.find((p) => p.id === pending.attackerId);
+          if (attacker) {
+            GameEngine.executeMarketCrashOnTarget(room, attacker, nextPlayer);
+          }
+          pending.targetPlayerIds.shift();
+          continue;
+        }
+
+        // For other actions:
+        const attacker = room.players.find((p) => p.id === pending.attackerId);
+        if (attacker) {
+          GameEngine.executeDirectTargetedAction(room, attacker, pending.card, pending.options);
+        }
+        pending.targetPlayerIds.shift();
       }
     }
     room.gameState.pendingAction = null;
@@ -976,21 +1189,61 @@ export class GameEngine {
   static proceedPendingActionAfterJSN(room: Room): void {
     if (!room.gameState?.pendingAction) return;
     const pending = room.gameState.pendingAction;
+    const attacker = room.players.find((p) => p.id === pending.attackerId);
+    const target = room.players.find((p) => p.id === pending.currentAwaitingPlayerId);
+
     if (
       pending.actionType === ActionType.RENT ||
       pending.actionType === ActionType.DOUBLE_THE_RENT ||
       pending.actionType === ActionType.ITS_MY_BIRTHDAY
     ) {
       pending.status = 'AWAITING_PAYMENT';
-    } else if (pending.actionType === ActionType.REPOSSESS) {
+      return;
+    }
+
+    if (pending.actionType === ActionType.REPOSSESS) {
       pending.status = 'AWAITING_REPOSSESS';
-    } else {
-      const attacker = room.players.find((p) => p.id === pending.attackerId);
-      if (attacker) {
-        GameEngine.executeDirectTargetedAction(room, attacker, pending.card, pending.options);
+      return;
+    }
+
+    if (pending.actionType === ActionType.TAX_COLLECTOR) {
+      if (target && target.bank.length > 1) {
+        pending.status = 'AWAITING_TAX_COLLECTOR';
+        return;
+      } else {
+        if (target) {
+          GameEngine.addLog(
+            room,
+            target.id,
+            'TAX_COLLECTOR_SKIP',
+            `🏛️ ${target.displayName} has only ${target.bank.length} card in their Bank, so they keep it and give away nothing (no debt chip owed).`
+          );
+        }
+        room.gameState.pendingAction = null;
+        return;
+      }
+    }
+
+    if (pending.actionType === ActionType.HEIST) {
+      if (attacker && target) {
+        GameEngine.executeHeistOnTarget(room, attacker, target);
       }
       GameEngine.advancePendingActionToNextTarget(room);
+      return;
     }
+
+    if (pending.actionType === ActionType.MARKET_CRASH) {
+      if (attacker && target) {
+        GameEngine.executeMarketCrashOnTarget(room, attacker, target);
+      }
+      GameEngine.advancePendingActionToNextTarget(room);
+      return;
+    }
+
+    if (attacker) {
+      GameEngine.executeDirectTargetedAction(room, attacker, pending.card, pending.options);
+    }
+    GameEngine.advancePendingActionToNextTarget(room);
   }
 
   /**
@@ -1238,6 +1491,158 @@ export class GameEngine {
     room.players.forEach((p) => GameEngine.checkAndBroadcastWin(room, p));
     room.gameState.pendingAction = null;
     return { success: true };
+  }
+
+  /**
+   * Submits Tax Collector bank distribution:
+   * Targeted victim keeps 1 card in their bank, and distributes all other bank cards to other players.
+   * If victim has <= 1 card in bank, they keep it and give nothing (no debt chip).
+   */
+  static submitTaxCollector(
+    room: Room,
+    targetId: string,
+    actionId: string,
+    keepCardId: string,
+    distributions: { cardId: string; targetPlayerId: string }[]
+  ): { success: boolean; error?: string } {
+    if (!room.gameState?.pendingAction || room.gameState.pendingAction.id !== actionId) {
+      return { success: false, error: 'No active tax collector action found' };
+    }
+    const pending = room.gameState.pendingAction;
+    if (pending.currentAwaitingPlayerId !== targetId) {
+      return { success: false, error: 'Not your turn to resolve Tax Collector' };
+    }
+
+    const target = room.players.find((p) => p.id === targetId);
+    if (!target) return { success: false, error: 'Player not found' };
+
+    const keptCard = target.bank.find((c) => c.id === keepCardId);
+    const keptCardName = keptCard ? `${keptCard.name} ($${keptCard.cashValue}M)` : '1 card';
+
+    let totalGiven = 0;
+    distributions.forEach(({ cardId, targetPlayerId }) => {
+      if (cardId === keepCardId) return;
+      const destPlayer = room.players.find((p) => p.id === targetPlayerId);
+      if (!destPlayer) return;
+
+      const cIdx = target.bank.findIndex((c) => c.id === cardId);
+      if (cIdx !== -1) {
+        const [card] = target.bank.splice(cIdx, 1);
+        destPlayer.bank.push(card);
+        totalGiven++;
+      }
+    });
+
+    // Any remaining cards not kept and not distributed go to attacker by default
+    const cardsToClear = target.bank.filter((c) => c.id !== keepCardId);
+    const attacker = room.players.find((p) => p.id === pending.attackerId);
+    if (attacker && cardsToClear.length > 0) {
+      cardsToClear.forEach((c) => {
+        const idx = target.bank.findIndex((bc) => bc.id === c.id);
+        if (idx !== -1) {
+          const [card] = target.bank.splice(idx, 1);
+          attacker.bank.push(card);
+          totalGiven++;
+        }
+      });
+    }
+
+    GameEngine.addLog(
+      room,
+      target.id,
+      'TAX_COLLECTOR_COMPLETE',
+      `🏛️ TAX COLLECTOR: ${target.displayName} kept ${keptCardName} and distributed ${totalGiven} bank cards across players!`
+    );
+
+    room.players.forEach((p) => GameEngine.checkAndBroadcastWin(room, p));
+    room.gameState.pendingAction = null;
+    return { success: true };
+  }
+
+  /**
+   * Executes Heist on 1 target: steals 1 card from their Bank directly into attacker's Bank.
+   * If target bank is empty, steals nothing and no debt chip is owed!
+   */
+  static executeHeistOnTarget(room: Room, attacker: Player, target: Player): void {
+    if (target.bank.length === 0) {
+      GameEngine.addLog(
+        room,
+        attacker.id,
+        'HEIST_EMPTY',
+        `${attacker.displayName} raided ${target.displayName}'s Bank, but it was empty! (No debt chip owed).`
+      );
+      return;
+    }
+    // Sort to steal highest cash value card
+    target.bank.sort((a, b) => b.cashValue - a.cashValue);
+    const stolenCard = target.bank.shift()!;
+    attacker.bank.push(stolenCard);
+    GameEngine.addLog(
+      room,
+      attacker.id,
+      'HEIST_SUCCESS',
+      `💰 HEIST! ${attacker.displayName} raided ${stolenCard.name} ($${stolenCard.cashValue}M) directly from ${target.displayName}'s Bank into their own Bank!`
+    );
+    GameEngine.checkAndBroadcastWin(room, attacker);
+  }
+
+  /**
+   * Executes Market Crash on 1 target: steals 1 property card from their table.
+   * Complete sets ARE fair game! If stolen property had a Shack, Shack transfers with it!
+   */
+  static executeMarketCrashOnTarget(room: Room, attacker: Player, target: Player): void {
+    const allSets = target.properties.filter((s) => s.cards.length > 0);
+    if (allSets.length === 0) {
+      GameEngine.addLog(
+        room,
+        attacker.id,
+        'MARKET_CRASH_EMPTY',
+        `${attacker.displayName}'s Market Crash found no properties on ${target.displayName}'s table!`
+      );
+      return;
+    }
+
+    let bestSet = allSets[0];
+    let bestCardIdx = 0;
+    let maxVal = -1;
+
+    allSets.forEach((set) => {
+      set.cards.forEach((c, idx) => {
+        if (c.cashValue > maxVal) {
+          maxVal = c.cashValue;
+          bestSet = set;
+          bestCardIdx = idx;
+        }
+      });
+    });
+
+    const [stolenCard] = bestSet.cards.splice(bestCardIdx, 1);
+    const hadShack = bestSet.shack;
+    if (hadShack) {
+      bestSet.shack = false;
+    }
+    bestSet.isComplete = bestSet.cards.length >= (PROPERTY_CONFIG[bestSet.color]?.setSize || 3);
+    target.properties = target.properties.filter((s) => s.cards.length > 0);
+
+    const targetColor = stolenCard.color || stolenCard.colors?.[0] || bestSet.color;
+    let mySet = attacker.properties.find((s) => s.color === targetColor);
+    if (!mySet) {
+      mySet = { color: targetColor, cards: [], house: false, hotel: false, shack: false, isComplete: false };
+      attacker.properties.push(mySet);
+    }
+    mySet.cards.push(stolenCard);
+    if (hadShack) {
+      mySet.shack = true;
+    }
+    mySet.isComplete = mySet.cards.length >= (PROPERTY_CONFIG[targetColor]?.setSize || 3);
+
+    GameEngine.addLog(
+      room,
+      attacker.id,
+      'MARKET_CRASH_SUCCESS',
+      `📉 MARKET CRASH! ${attacker.displayName} seized ${stolenCard.name} ${hadShack ? '(with attached Shack!) ' : ''}from ${target.displayName}'s collection!`
+    );
+    GameEngine.checkAndBroadcastWin(room, attacker);
   }
 
   /**

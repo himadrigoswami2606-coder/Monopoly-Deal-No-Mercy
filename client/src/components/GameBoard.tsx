@@ -18,6 +18,7 @@ import {
   EVENT_RESPOND_JUST_SAY_NO,
   EVENT_SUBMIT_PAYMENT,
   EVENT_SUBMIT_REPOSSESS,
+  EVENT_SUBMIT_TAX_COLLECTOR,
   EVENT_FLIP_WILDCARD,
   EVENT_MOVE_SHACK,
   PropertySet,
@@ -33,6 +34,7 @@ import { WildcardSelectModal } from './WildcardSelectModal';
 import { RulesHelpModal } from './RulesHelpModal';
 import { HandLimitDiscardModal } from './HandLimitDiscardModal';
 import { RepossessModal } from './RepossessModal';
+import { TaxCollectorModal } from './TaxCollectorModal';
 import { BankInspectorModal } from './BankInspectorModal';
 import { PropertySetInspectorModal } from './PropertySetInspectorModal';
 import { PLAYER_COLORS } from './PlayerCard';
@@ -161,6 +163,11 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           ActionType.SHACK,
           ActionType.HOUSE,
           ActionType.HOTEL,
+          ActionType.DEAL_BREAKER,
+          ActionType.HEIST,
+          ActionType.MARKET_CRASH,
+          ActionType.TAX_COLLECTOR,
+          ActionType.UNFAIR_TRADE,
         ].includes(card.actionType!));
 
     if (needsTargetModal) {
@@ -1046,6 +1053,35 @@ export const GameBoard: React.FC<GameBoardProps> = ({
               onConfirmRepossess={(keepCardId, distributions) => {
                 sounds.playActionAttack();
                 socket?.emit(EVENT_SUBMIT_REPOSSESS, {
+                  actionId: gameState.pendingAction?.id,
+                  keepCardId,
+                  distributions,
+                });
+              }}
+            />
+          )}
+
+          {gameState.pendingAction.status === 'AWAITING_TAX_COLLECTOR' && (
+            <TaxCollectorModal
+              attackerName={gameState.pendingAction.attackerName || 'Opponent'}
+              myPlayer={myPlayer}
+              otherPlayers={opponents}
+              hasJustSayNo={hasJustSayNo}
+              onJustSayNo={() => {
+                sounds.playJustSayNo();
+                const jsnCard = myHand.find(
+                  (c) => c.type === CardType.ACTION && c.actionType === ActionType.JUST_SAY_NO
+                );
+                socket?.emit(EVENT_RESPOND_JUST_SAY_NO, {
+                  actionId: gameState.pendingAction?.id,
+                  accept: false,
+                  playJustSayNo: true,
+                  justSayNoCardId: jsnCard?.id,
+                });
+              }}
+              onConfirmTaxCollector={(keepCardId, distributions) => {
+                sounds.playBankCoin();
+                socket?.emit(EVENT_SUBMIT_TAX_COLLECTOR, {
                   actionId: gameState.pendingAction?.id,
                   keepCardId,
                   distributions,

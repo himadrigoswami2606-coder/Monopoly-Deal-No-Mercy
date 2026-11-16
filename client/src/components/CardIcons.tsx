@@ -226,6 +226,66 @@ export const ActionIcon: React.FC<{ type: ActionType; className?: string }> = ({
         </svg>
       );
 
+    case ActionType.DEAL_BREAKER:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          <circle cx="32" cy="32" r="28" fill="#e11d48" fillOpacity="0.25" stroke="#f43f5e" strokeWidth="2.5" />
+          {/* Shattered complete set / Hammer & Broken Star */}
+          <polygon points="32,10 37,24 52,24 40,34 45,48 32,38 19,48 24,34 12,24 27,24" fill="#f59e0b" stroke="#d97706" strokeWidth="1.5" />
+          <path d="M 16 16 L 48 48 M 48 16 L 16 48" stroke="#ffffff" strokeWidth="3" strokeLinecap="round" />
+        </svg>
+      );
+
+    case ActionType.HEIST:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          <circle cx="32" cy="32" r="28" fill="#059669" fillOpacity="0.25" stroke="#10b981" strokeWidth="2.5" />
+          {/* Money sack with $ and raid glow */}
+          <path d="M 22 22 C 22 18 42 18 42 22 L 48 46 C 48 52 16 52 16 46 Z" fill="#10b981" stroke="#047857" strokeWidth="2" />
+          <circle cx="32" cy="18" r="6" fill="#047857" />
+          <text x="32" y="42" fontFamily="Oswald, sans-serif" fontSize="16" fontWeight="900" textAnchor="middle" fill="#ffffff">$</text>
+        </svg>
+      );
+
+    case ActionType.MARKET_CRASH:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          <circle cx="32" cy="32" r="28" fill="#dc2626" fillOpacity="0.25" stroke="#ef4444" strokeWidth="2.5" />
+          {/* Crashing chart downward with lightning */}
+          <path d="M 14 20 L 26 30 L 36 24 L 50 44" stroke="#ffffff" strokeWidth="3.5" strokeLinecap="round" strokeLinejoin="round" />
+          <polygon points="50,34 50,44 40,44" fill="#ffffff" />
+        </svg>
+      );
+
+    case ActionType.TAX_COLLECTOR:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          <circle cx="32" cy="32" r="28" fill="#d97706" fillOpacity="0.25" stroke="#f59e0b" strokeWidth="2.5" />
+          {/* Classical Treasury Temple Columns */}
+          <polygon points="32,12 12,22 52,22" fill="#fbbf24" stroke="#b45309" strokeWidth="1.5" />
+          <rect x="16" y="22" width="6" height="22" fill="#fef3c7" stroke="#b45309" strokeWidth="1" />
+          <rect x="29" y="22" width="6" height="22" fill="#fef3c7" stroke="#b45309" strokeWidth="1" />
+          <rect x="42" y="22" width="6" height="22" fill="#fef3c7" stroke="#b45309" strokeWidth="1" />
+          <rect x="10" y="44" width="44" height="6" rx="1" fill="#fbbf24" stroke="#b45309" strokeWidth="1.5" />
+        </svg>
+      );
+
+    case ActionType.UNFAIR_TRADE:
+      return (
+        <svg viewBox="0 0 64 64" className={className} fill="none">
+          <circle cx="32" cy="32" r="28" fill="#7c3aed" fillOpacity="0.25" stroke="#8b5cf6" strokeWidth="2.5" />
+          {/* Unbalanced Scales of Justice */}
+          <path d="M 32 14 L 32 46 M 22 46 L 42 46" stroke="#c4b5fd" strokeWidth="2.5" strokeLinecap="round" />
+          <path d="M 16 22 L 48 30" stroke="#fbbf24" strokeWidth="3" strokeLinecap="round" />
+          {/* Left Pan (Heavy) */}
+          <path d="M 12 34 Q 16 38 20 34 Z" fill="#fbbf24" stroke="#d97706" strokeWidth="1" />
+          <path d="M 16 22 L 12 34 M 16 22 L 20 34" stroke="#c4b5fd" strokeWidth="1" />
+          {/* Right Pan (Light) */}
+          <path d="M 44 42 Q 48 46 52 42 Z" fill="#fbbf24" stroke="#d97706" strokeWidth="1" />
+          <path d="M 48 30 L 44 42 M 48 30 L 52 42" stroke="#c4b5fd" strokeWidth="1" />
+        </svg>
+      );
+
     case ActionType.RENT:
     default:
       return (

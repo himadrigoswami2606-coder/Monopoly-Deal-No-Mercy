@@ -37,6 +37,11 @@ export enum ActionType {
   YOINK            = 'YOINK',
   REPOSSESS        = 'REPOSSESS',
   TOUGH_LUCK       = 'TOUGH_LUCK',
+  DEAL_BREAKER     = 'DEAL_BREAKER',
+  HEIST            = 'HEIST',
+  MARKET_CRASH     = 'MARKET_CRASH',
+  TAX_COLLECTOR    = 'TAX_COLLECTOR',
+  UNFAIR_TRADE     = 'UNFAIR_TRADE',
 }
 
 /** The ten property colors (including Railroad and Utility). */
@@ -250,7 +255,11 @@ export interface PendingDebtSettlement {
   creditorIds: string[]; // prioritized by acquiredAt
 }
 
-export type PendingActionStatus = 'AWAITING_JSN' | 'AWAITING_PAYMENT' | 'AWAITING_REPOSSESS';
+export type PendingActionStatus =
+  | 'AWAITING_JSN'
+  | 'AWAITING_PAYMENT'
+  | 'AWAITING_REPOSSESS'
+  | 'AWAITING_TAX_COLLECTOR';
 
 /** Targeted action requiring real-time response from opponent(s) */
 export interface PendingAction {
@@ -366,6 +375,7 @@ export const EVENT_RESOLVE_DEBT_DRAW= 'resolve-debt-draw'as const;
 export const EVENT_RESPOND_JUST_SAY_NO = 'respond-just-say-no' as const;
 export const EVENT_SUBMIT_PAYMENT   = 'submit-payment'   as const;
 export const EVENT_SUBMIT_REPOSSESS = 'submit-repossess' as const;
+export const EVENT_SUBMIT_TAX_COLLECTOR = 'submit-tax-collector' as const;
 export const EVENT_MOVE_SHACK       = 'move-shack'       as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
@@ -405,6 +415,7 @@ export interface ClientToServerEvents {
   [EVENT_RESPOND_JUST_SAY_NO]: (data: { actionId: string; accept: boolean; justSayNoCardId?: string }) => void;
   [EVENT_SUBMIT_PAYMENT]: (data: { actionId: string; selectedCardIds: string[]; surrenderDebtChip?: boolean }) => void;
   [EVENT_SUBMIT_REPOSSESS]: (data: { actionId: string; keepCardId: string; distributions: { cardId: string; targetPlayerId: string }[] }) => void;
+  [EVENT_SUBMIT_TAX_COLLECTOR]: (data: { actionId: string; keepCardId: string; distributions: { cardId: string; targetPlayerId: string }[] }) => void;
   [EVENT_MOVE_SHACK]: (data: { fromColor: PropertyColor; toColor: PropertyColor }) => void;
 }
 
