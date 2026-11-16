@@ -265,6 +265,7 @@ export interface PendingAction {
   options?: any;
   rentAmount?: number;
   rentColor?: PropertyColor;
+  isDoubleRent?: boolean;
   amountDue?: number;
   demandDescription?: string;
   justSayNoChain: { playerId: string; playerName: string; cardId: string }[];
@@ -365,6 +366,7 @@ export const EVENT_RESOLVE_DEBT_DRAW= 'resolve-debt-draw'as const;
 export const EVENT_RESPOND_JUST_SAY_NO = 'respond-just-say-no' as const;
 export const EVENT_SUBMIT_PAYMENT   = 'submit-payment'   as const;
 export const EVENT_SUBMIT_REPOSSESS = 'submit-repossess' as const;
+export const EVENT_MOVE_SHACK       = 'move-shack'       as const;
 
 export const EVENT_ROOM_CREATED     = 'room-created'     as const;
 export const EVENT_ROOM_JOINED      = 'room-joined'      as const;
@@ -403,6 +405,7 @@ export interface ClientToServerEvents {
   [EVENT_RESPOND_JUST_SAY_NO]: (data: { actionId: string; accept: boolean; justSayNoCardId?: string }) => void;
   [EVENT_SUBMIT_PAYMENT]: (data: { actionId: string; selectedCardIds: string[]; surrenderDebtChip?: boolean }) => void;
   [EVENT_SUBMIT_REPOSSESS]: (data: { actionId: string; keepCardId: string; distributions: { cardId: string; targetPlayerId: string }[] }) => void;
+  [EVENT_MOVE_SHACK]: (data: { fromColor: PropertyColor; toColor: PropertyColor }) => void;
 }
 
 export interface ServerToClientEvents {

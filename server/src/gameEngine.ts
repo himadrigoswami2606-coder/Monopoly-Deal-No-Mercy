@@ -487,6 +487,7 @@ export class GameEngine {
 
       const isTargetedAction = [
         ActionType.RENT,
+        ActionType.DOUBLE_THE_RENT,
         ActionType.ITS_MY_BIRTHDAY,
         ActionType.REPOSSESS,
         ActionType.FORCED_DEBT,
@@ -595,19 +596,20 @@ export class GameEngine {
     const targetOpponent = room.players.find((p) => p.id === options?.targetPlayerId);
 
     let rentAmount = 0;
-    if (card.actionType === ActionType.RENT) {
+    if (card.actionType === ActionType.RENT || card.actionType === ActionType.DOUBLE_THE_RENT) {
       const color = options?.targetColor as PropertyColor | undefined;
       if (color && PROPERTY_CONFIG[color]) {
         const set = player.properties.find((s) => s.color === color);
         const count = set ? set.cards.length : 0;
-        rentAmount = PROPERTY_CONFIG[color]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[color]?.rentValues?.length || 1) - 1)] || 1;
-        if (set?.shack) rentAmount += 3; // Official Shack bonus: + $3M
-        if (set?.house) rentAmount += 3;
-        if (set?.hotel) rentAmount += 4;
+        let baseRent = PROPERTY_CONFIG[color]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[color]?.rentValues?.length || 1) - 1)] || 1;
+        if (set?.shack) baseRent += 3; // Official Shack bonus: + $3M
+        if (set?.house) baseRent += 3;
+        if (set?.hotel) baseRent += 4;
+        rentAmount = card.actionType === ActionType.DOUBLE_THE_RENT ? baseRent * 2 : baseRent;
       }
-      targets = card.isWildRent && targetOpponent
+      targets = (card.isWildRent && targetOpponent)
         ? [targetOpponent]
-        : room.players.filter((p) => p.id !== player.id);
+        : (targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== player.id));
     } else if (card.actionType === ActionType.ITS_MY_BIRTHDAY) {
       rentAmount = 2;
       targets = room.players.filter((p) => p.id !== player.id);
@@ -656,6 +658,11 @@ export class GameEngine {
         currentAwaitingPlayerId: firstTarget.id,
         options,
         rentAmount,
+        amountDue: rentAmount,
+        isDoubleRent: card.actionType === ActionType.DOUBLE_THE_RENT,
+        demandDescription: card.actionType === ActionType.DOUBLE_THE_RENT
+          ? `DOUBLE RENT on ${PROPERTY_CONFIG[options?.targetColor as PropertyColor]?.name || 'Properties'}: $${rentAmount}M`
+          : undefined,
         rentColor: options?.targetColor,
         justSayNoChain: [],
         status: 'AWAITING_JSN',
@@ -671,7 +678,11 @@ export class GameEngine {
     }
 
     // Target does NOT have Just Say No in hand:
-    if (card.actionType === ActionType.RENT || card.actionType === ActionType.ITS_MY_BIRTHDAY) {
+    if (
+      card.actionType === ActionType.RENT ||
+      card.actionType === ActionType.DOUBLE_THE_RENT ||
+      card.actionType === ActionType.ITS_MY_BIRTHDAY
+    ) {
       room.gameState.pendingAction = {
         id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
         attackerId: player.id,
@@ -683,6 +694,11 @@ export class GameEngine {
         currentAwaitingPlayerId: firstTarget.id,
         options,
         rentAmount,
+        amountDue: rentAmount,
+        isDoubleRent: card.actionType === ActionType.DOUBLE_THE_RENT,
+        demandDescription: card.actionType === ActionType.DOUBLE_THE_RENT
+          ? `DOUBLE RENT on ${PROPERTY_CONFIG[options?.targetColor as PropertyColor]?.name || 'Properties'}: $${rentAmount}M`
+          : undefined,
         rentColor: options?.targetColor,
         justSayNoChain: [],
         status: 'AWAITING_PAYMENT',
@@ -692,7 +708,7 @@ export class GameEngine {
         room,
         player.id,
         'RENT_DEMANDED',
-        `📢 ${player.displayName} demanded $${rentAmount}M from ${firstTarget.displayName} with ${card.name}!`
+        `📢 ${player.displayName} demanded $${rentAmount}M ${card.actionType === ActionType.DOUBLE_THE_RENT ? '(DOUBLED RENT) ' : ''}from ${firstTarget.displayName} with ${card.name}!`
       );
       return { success: true };
     }
@@ -960,7 +976,11 @@ export class GameEngine {
   static proceedPendingActionAfterJSN(room: Room): void {
     if (!room.gameState?.pendingAction) return;
     const pending = room.gameState.pendingAction;
-    if (pending.actionType === ActionType.RENT || pending.actionType === ActionType.ITS_MY_BIRTHDAY) {
+    if (
+      pending.actionType === ActionType.RENT ||
+      pending.actionType === ActionType.DOUBLE_THE_RENT ||
+      pending.actionType === ActionType.ITS_MY_BIRTHDAY
+    ) {
       pending.status = 'AWAITING_PAYMENT';
     } else if (pending.actionType === ActionType.REPOSSESS) {
       pending.status = 'AWAITING_REPOSSESS';
@@ -1288,6 +1308,60 @@ export class GameEngine {
       playerId,
       'FLIP_WILDCARD',
       `🔄 ${player.displayName} flipped wildcard ${foundCard.name} to ${PROPERTY_CONFIG[toColor]?.name || toColor} (costs 1 play).`
+    );
+
+    GameEngine.checkAndBroadcastWin(room, player);
+    return { success: true };
+  }
+
+  /**
+   * Moves a Shack between property sets (Point 7).
+   * Costs 1 play (playsUsedThisTurn++).
+   */
+  static moveShack(
+    room: Room,
+    playerId: string,
+    fromColor: PropertyColor,
+    toColor: PropertyColor
+  ): { success: boolean; error?: string } {
+    if (!room.gameState || room.gameState.isGameOver) {
+      return { success: false, error: 'Game is not active' };
+    }
+    if (room.gameState.activePlayerId !== playerId) {
+      return { success: false, error: 'You can only move shacks on your turn' };
+    }
+    if (room.gameState.playsUsedThisTurn >= room.gameState.maxPlaysPerTurn) {
+      return { success: false, error: 'No plays remaining this turn (max 3)' };
+    }
+    if (fromColor === toColor) {
+      return { success: false, error: 'Choose a different property set to move the shack to' };
+    }
+
+    const player = room.players.find((p) => p.id === playerId);
+    if (!player) return { success: false, error: 'Player not found' };
+
+    const fromSet = player.properties.find((s) => s.color === fromColor);
+    if (!fromSet || !fromSet.shack) {
+      return { success: false, error: 'No shack found on the source property' };
+    }
+
+    const toSet = player.properties.find((s) => s.color === toColor);
+    if (!toSet || toSet.cards.length === 0) {
+      return { success: false, error: 'Destination property set must have at least one card' };
+    }
+    if (toSet.shack) {
+      return { success: false, error: 'Destination property already has a shack' };
+    }
+
+    fromSet.shack = false;
+    toSet.shack = true;
+    room.gameState.playsUsedThisTurn++;
+
+    GameEngine.addLog(
+      room,
+      playerId,
+      'MOVE_SHACK',
+      `🛖 ${player.displayName} moved a Shack from ${PROPERTY_CONFIG[fromColor]?.name || fromColor} to ${PROPERTY_CONFIG[toColor]?.name || toColor} (costs 1 play).`
     );
 
     GameEngine.checkAndBroadcastWin(room, player);

@@ -56,7 +56,8 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
     card.actionType === ActionType.HOTEL ||
     card.actionType === ActionType.SHACK;
   const isWildcard = card.type === 'PROPERTY_WILDCARD' as any;
-  const isRent = card.actionType === ActionType.RENT;
+  const isDoubleRent = card.actionType === ActionType.DOUBLE_THE_RENT;
+  const isRent = card.actionType === ActionType.RENT || isDoubleRent;
 
   // For Rainbow Wildcard (Point 9): only colors player already owns in property sets
   const ownedColors = Array.from(new Set(myPlayer.properties.map((s) => s.color)));
@@ -361,19 +362,30 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
           </div>
         )}
 
-        {/* 7. Rent Card: Pick which color set to charge rent for */}
+        {/* 7. Rent / Double the Rent Card: Pick which color set to charge rent for */}
         {isRent && (
           <div className="mb-4">
             <label className="block text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-              Charge Rent for which Owned Color?
+              {isDoubleRent
+                ? '⚡ Double Rent for which Owned Color Set? (Charges 2x Rent to Players)'
+                : 'Charge Rent for which Owned Color?'}
             </label>
             <div className="grid grid-cols-2 gap-2">
-              {(card.rentColors || Object.keys(PROPERTY_CONFIG) as PropertyColor[])
+              {(card.rentColors || (Object.keys(PROPERTY_CONFIG) as PropertyColor[]))
                 .filter((c) => myPlayer.properties.some((s) => s.color === c))
                 .map((c) => {
                   const set = myPlayer.properties.find((s) => s.color === c);
                   const count = set ? set.cards.length : 0;
-                  const rent = PROPERTY_CONFIG[c]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[c]?.rentValues?.length || 1) - 1)] || 1;
+                  const baseRent =
+                    PROPERTY_CONFIG[c]?.rentValues?.[
+                      Math.min(count - 1, (PROPERTY_CONFIG[c]?.rentValues?.length || 1) - 1)
+                    ] || 1;
+                  const shackBonus = set?.shack ? 3 : 0;
+                  const houseBonus = set?.house ? 3 : 0;
+                  const hotelBonus = set?.hotel ? 4 : 0;
+                  const totalBase = baseRent + shackBonus + houseBonus + hotelBonus;
+                  const chargedRent = isDoubleRent ? totalBase * 2 : totalBase;
+
                   return (
                     <button
                       key={c}
@@ -385,11 +397,25 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
                           : 'bg-slate-950/60 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      <div className="font-bold text-xs uppercase" style={{ color: PROPERTY_CONFIG[c]?.hexColor }}>
+                      <div
+                        className="font-bold text-xs uppercase"
+                        style={{ color: PROPERTY_CONFIG[c]?.hexColor }}
+                      >
                         {PROPERTY_CONFIG[c]?.name} ({count} cards)
                       </div>
                       <div className="text-[10px] text-emerald-400 font-mono mt-0.5 font-bold">
-                        Rent: ${rent}M {set?.shack ? '+ $3M Shack' : ''} {set?.house ? '+ $3M House' : ''} {set?.hotel ? '+ $4M Hotel' : ''}
+                        {isDoubleRent ? (
+                          <span>
+                            Base: ${totalBase}M ➔{' '}
+                            <strong className="text-amber-300">DOUBLED: ${chargedRent}M</strong>
+                          </span>
+                        ) : (
+                          <span>
+                            Rent: ${baseRent}M {set?.shack ? '+ $3M Shack' : ''}{' '}
+                            {set?.house ? '+ $3M House' : ''} {set?.hotel ? '+ $4M Hotel' : ''} = $
+                            {totalBase}M
+                          </span>
+                        )}
                       </div>
                     </button>
                   );
@@ -397,7 +423,7 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
             </div>
             {myPlayer.properties.length === 0 && (
               <div className="text-xs text-rose-400 p-3 bg-rose-500/10 rounded-xl border border-rose-500/30">
-                You do not own any properties in these colors! You can bank this rent card as cash instead.
+                You do not own any properties in these colors! You can bank this card as cash instead.
               </div>
             )}
           </div>

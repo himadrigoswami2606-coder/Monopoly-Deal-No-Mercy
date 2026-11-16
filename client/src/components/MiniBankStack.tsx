@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { Card, CardType } from '../../../shared/types';
 
 interface MiniBankStackProps {
@@ -6,6 +6,7 @@ interface MiniBankStackProps {
   cards: Card[];
   playerName?: string;
   isSelf?: boolean;
+  onClick?: () => void;
 }
 
 export const MiniBankStack: React.FC<MiniBankStackProps> = ({
@@ -13,9 +14,8 @@ export const MiniBankStack: React.FC<MiniBankStackProps> = ({
   cards,
   playerName = 'Player',
   isSelf = false,
+  onClick,
 }) => {
-  const [showTooltip, setShowTooltip] = useState(false);
-
   // Latest / top card in bank
   const topCard = cards && cards.length > 0 ? cards[cards.length - 1] : null;
 
@@ -39,19 +39,20 @@ export const MiniBankStack: React.FC<MiniBankStackProps> = ({
 
   return (
     <div
-      className="relative flex items-center gap-2 group cursor-pointer"
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-      title={`${playerName}'s Bank: $${totalAmount}M (${cards.length} cards)`}
+      onClick={onClick}
+      role="button"
+      tabIndex={0}
+      className="relative flex items-center gap-2 group cursor-pointer p-1 rounded-xl hover:bg-white/5 active:scale-95 transition-all select-none"
+      title={`Click to view all ${cards.length} cards in ${isSelf ? 'your' : playerName + "'s"} bank ($${totalAmount}M)`}
     >
-      {/* Mini Bank Card / Stack Visual */}
+      {/* Mini Bank Card / Clean 3D Parallel Stack Visual (Point 2: Clean visual, no messy wireframes) */}
       <div className="relative">
-        {/* Background stack layers if > 1 card */}
+        {/* Crisp parallel layered card stack */}
         {cards.length > 2 && (
-          <div className="absolute -top-1.5 -left-1.5 w-[52px] h-[76px] rounded-lg bg-black/40 border border-[#1f4d36] -rotate-6 pointer-events-none" />
+          <div className="absolute -top-1.5 -left-1.5 w-[52px] h-[76px] rounded-lg bg-slate-800/90 border border-slate-600/70 shadow-sm pointer-events-none" />
         )}
         {cards.length > 1 && (
-          <div className="absolute -top-0.5 -left-0.5 w-[52px] h-[76px] rounded-lg bg-black/50 border border-[#1f4d36] rotate-3 pointer-events-none" />
+          <div className="absolute -top-0.5 -left-0.5 w-[52px] h-[76px] rounded-lg bg-slate-900 border border-slate-500/80 shadow pointer-events-none" />
         )}
 
         {topCard ? (
@@ -59,7 +60,7 @@ export const MiniBankStack: React.FC<MiniBankStackProps> = ({
             const style = getCardStyle(topCard);
             return (
               <div
-                className={`w-[52px] h-[76px] rounded-lg border shadow-md flex flex-col justify-between p-1 transition-all duration-200 group-hover:scale-105 group-hover:shadow-lg ${style.bg} ${style.border} ${style.text}`}
+                className={`relative z-10 w-[52px] h-[76px] rounded-lg border shadow-md flex flex-col justify-between p-1 transition-transform duration-200 group-hover:scale-105 group-hover:shadow-lg ${style.bg} ${style.border} ${style.text}`}
               >
                 <div className="flex items-center justify-between text-[7px] font-mono font-black uppercase tracking-tight opacity-80">
                   <span>{topCard.type === CardType.MONEY ? 'CASH' : 'BANKED'}</span>
@@ -82,7 +83,7 @@ export const MiniBankStack: React.FC<MiniBankStackProps> = ({
             );
           })()
         ) : (
-          <div className="w-[52px] h-[76px] rounded-lg border-2 border-dashed border-[#1f4d36] bg-[#081a12]/80 flex flex-col items-center justify-center p-1 text-slate-500">
+          <div className="relative z-10 w-[52px] h-[76px] rounded-lg border-2 border-dashed border-[#1f4d36] bg-[#081a12]/80 flex flex-col items-center justify-center p-1 text-slate-500">
             <span className="text-base opacity-40">🏦</span>
             <span className="text-[7.5px] font-mono uppercase text-center mt-1">Empty</span>
           </div>
@@ -90,7 +91,7 @@ export const MiniBankStack: React.FC<MiniBankStackProps> = ({
       </div>
 
       {/* Details beside card */}
-      <div className="flex flex-col">
+      <div className="flex flex-col pr-1">
         <div className="text-[9px] font-heading font-black uppercase tracking-wider text-slate-400 flex items-center gap-1">
           <span>🏦 BANK</span>
         </div>
@@ -100,35 +101,10 @@ export const MiniBankStack: React.FC<MiniBankStackProps> = ({
         <div className="text-[9.5px] text-slate-400 font-mono">
           {cards.length} {cards.length === 1 ? 'card' : 'cards'}
         </div>
-      </div>
-
-      {/* Hover Dropdown / Tooltip listing all banked cards */}
-      {showTooltip && cards.length > 0 && (
-        <div className="absolute top-full left-0 mt-2 z-50 bg-[#081a12]/95 border border-amber-400/60 rounded-2xl p-3 shadow-2xl backdrop-blur-md min-w-[180px] max-w-xs animate-fade-in pointer-events-none">
-          <div className="text-[10px] uppercase font-heading font-bold text-amber-300 pb-1.5 border-b border-[#1f4d36] mb-1.5 flex justify-between">
-            <span>{isSelf ? 'Your Bank' : `${playerName}'s Bank`}</span>
-            <span className="text-emerald-400 font-mono">${totalAmount}M</span>
-          </div>
-          <div className="space-y-1 max-h-44 overflow-y-auto pr-1">
-            {cards.map((c, i) => (
-              <div
-                key={c.id || i}
-                className="flex items-center justify-between text-[10px] text-slate-300 bg-black/40 px-2 py-0.5 rounded border border-white/5"
-              >
-                <span className="truncate pr-2">
-                  {c.name} {i === cards.length - 1 ? '★' : ''}
-                </span>
-                <span className="font-mono font-bold text-emerald-400 flex-shrink-0">
-                  ${c.cashValue}M
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="text-[8px] text-slate-500 text-center mt-1.5 pt-1 border-t border-[#1f4d36]">
-            ★ = Top / Latest deposited card
-          </div>
+        <div className="text-[8px] text-amber-400/90 font-bold tracking-tight mt-0.5 flex items-center gap-0.5">
+          <span>👁️ Inspect</span>
         </div>
-      )}
+      </div>
     </div>
   );
 };

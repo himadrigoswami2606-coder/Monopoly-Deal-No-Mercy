@@ -19,6 +19,8 @@ import {
   EVENT_SUBMIT_PAYMENT,
   EVENT_SUBMIT_REPOSSESS,
   EVENT_FLIP_WILDCARD,
+  EVENT_MOVE_SHACK,
+  PropertySet,
 } from '../../../shared/types';
 import { PROPERTY_CONFIG } from '../../../shared/deckConfig';
 import { CardView } from './CardView';
@@ -31,6 +33,8 @@ import { WildcardSelectModal } from './WildcardSelectModal';
 import { RulesHelpModal } from './RulesHelpModal';
 import { HandLimitDiscardModal } from './HandLimitDiscardModal';
 import { RepossessModal } from './RepossessModal';
+import { BankInspectorModal } from './BankInspectorModal';
+import { PropertySetInspectorModal } from './PropertySetInspectorModal';
 import { PLAYER_COLORS } from './PlayerCard';
 import { getDebtChipTheme } from '../utils/debtChipThemes';
 import { sounds } from '../utils/audio';
@@ -55,6 +59,17 @@ export const GameBoard: React.FC<GameBoardProps> = ({
   const [wildcardModalCard, setWildcardModalCard] = useState<Card | null>(null);
   const [showLogDrawer, setShowLogDrawer] = useState(false);
   const [showRulesModal, setShowRulesModal] = useState(false);
+  const [inspectingBank, setInspectingBank] = useState<{
+    playerName: string;
+    totalAmount: number;
+    cards: Card[];
+    isSelf: boolean;
+  } | null>(null);
+  const [inspectingPropertySet, setInspectingPropertySet] = useState<{
+    ownerName: string;
+    set: PropertySet;
+    isOwner: boolean;
+  } | null>(null);
 
   // Staged debt settlement from turn start draw (Points 4 & 5)
   const pendingSettlement = gameState.pendingDebtSettlement?.playerId === myPlayer.id
@@ -142,6 +157,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           ActionType.REPOSSESS,
           ActionType.TOUGH_LUCK,
           ActionType.RENT,
+          ActionType.DOUBLE_THE_RENT,
           ActionType.SHACK,
           ActionType.HOUSE,
           ActionType.HOTEL,
@@ -217,29 +233,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
     setShowHandLimitModal(false);
   };
 
-  // Point 5 & 9: Flipping wildcards costs 1 play
-  const handleFlipWildcardInSet = (card: Card, currentColor: PropertyColor) => {
-    if (!isMyTurn) return;
-    if (gameState.playsUsedThisTurn >= gameState.maxPlaysPerTurn) {
-      alert('No plays remaining this turn! (Max 3 plays per turn)');
-      return;
-    }
-
-    if (card.isRainbow) {
-      setFlipRainbowCard(card);
-      return;
-    }
-
-    const otherColor = card.colors?.find((c) => c !== currentColor);
-    if (otherColor) {
-      sounds.playCardSnap();
-      socket?.emit(EVENT_FLIP_WILDCARD, {
-        cardId: card.id,
-        toColor: otherColor,
-      });
-    }
-  };
-
   const handleConfirmRainbowFlip = (toColor: PropertyColor) => {
     if (!flipRainbowCard) return;
     sounds.playCardSnap();
@@ -248,6 +241,32 @@ export const GameBoard: React.FC<GameBoardProps> = ({
       toColor,
     });
     setFlipRainbowCard(null);
+  };
+
+  const handleFlipWildcardDirect = (card: Card, toColor: PropertyColor) => {
+    if (!isMyTurn) return;
+    if (gameState.playsUsedThisTurn >= gameState.maxPlaysPerTurn) {
+      alert('No plays remaining this turn! (Max 3 plays per turn)');
+      return;
+    }
+    sounds.playCardSnap();
+    socket?.emit(EVENT_FLIP_WILDCARD, {
+      cardId: card.id,
+      toColor,
+    });
+  };
+
+  const handleMoveShack = (fromColor: PropertyColor, toColor: PropertyColor) => {
+    if (!isMyTurn) return;
+    if (gameState.playsUsedThisTurn >= gameState.maxPlaysPerTurn) {
+      alert('No plays remaining this turn! (Max 3 plays per turn)');
+      return;
+    }
+    sounds.playPropertyPlacement();
+    socket?.emit(EVENT_MOVE_SHACK, {
+      fromColor,
+      toColor,
+    });
   };
 
   const handleLeaveGame = () => {
@@ -459,6 +478,14 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                           totalAmount={opp.bankTotal}
                           cards={opp.bankCards || []}
                           playerName={opp.displayName}
+                          onClick={() =>
+                            setInspectingBank({
+                              playerName: opp.displayName,
+                              totalAmount: opp.bankTotal,
+                              cards: opp.bankCards || [],
+                              isSelf: false,
+                            })
+                          }
                         />
                       </div>
 
@@ -481,10 +508,20 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                               return (
                                 <div
                                   key={sIdx}
-                                  className="bg-[#081a12] border border-black/40 rounded-lg p-1.5 min-w-[95px] shadow"
+                                  onClick={() =>
+                                    setInspectingPropertySet({
+                                      ownerName: `${opp.displayName}'s`,
+                                      set,
+                                      isOwner: false,
+                                    })
+                                  }
+                                  role="button"
+                                  tabIndex={0}
+                                  className="bg-[#081a12] border border-black/40 hover:border-amber-400/50 rounded-xl p-2 min-w-[105px] shadow cursor-pointer transition-all hover:scale-105 active:scale-95 group select-none"
+                                  title="Click to inspect this property set"
                                 >
                                   <div
-                                    className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex justify-between"
+                                    className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex justify-between shadow-sm"
                                     style={{
                                       backgroundColor: meta?.hexColor,
                                       color: meta?.textColor,
@@ -497,7 +534,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                                   </div>
 
                                   {/* Rent & Shack Display */}
-                                  <div className="text-[8px] text-emerald-400 font-mono font-bold text-center mb-1 bg-black/40 rounded py-0.2">
+                                  <div className="text-[8px] text-emerald-400 font-mono font-bold text-center mb-1 bg-black/40 rounded py-0.5 border border-emerald-500/20">
                                     Rent: ${totalRent}M {set.shack ? '(Shack)' : ''}
                                   </div>
 
@@ -510,6 +547,9 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                                         {c.name}
                                       </div>
                                     ))}
+                                  </div>
+                                  <div className="text-[7.5px] text-center text-amber-300/80 font-bold uppercase tracking-wider mt-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                                    👁️ Inspect
                                   </div>
                                 </div>
                               );
@@ -701,21 +741,47 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-end">
             {/* Left Area (Bank & Sets) */}
             <div className="lg:col-span-5 space-y-3">
-              {/* Bank Area (Screenshot 3) */}
+              {/* Bank Area (Screenshot 3 & Point 4: Click to view all cards) */}
               <div>
                 <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1 flex items-center justify-between">
-                  <span>BANK (${myBankTotal}M)</span>
-                  <span className="text-[9px] text-slate-500">Stacked cash cards</span>
+                  <span>BANK (${myBankTotal}M) • {myPlayer.bank.length} cards</span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setInspectingBank({
+                        playerName: 'Your',
+                        totalAmount: myBankTotal,
+                        cards: myPlayer.bank || [],
+                        isSelf: true,
+                      })
+                    }
+                    className="text-[9px] text-amber-300 font-bold hover:underline flex items-center gap-1 cursor-pointer"
+                  >
+                    👁️ Open Bank Vault
+                  </button>
                 </div>
 
-                <div className="h-28 bg-[#0b2318] border border-dashed border-[#1f4d36] rounded-2xl p-2 flex items-center gap-2 overflow-x-auto shadow-inner">
+                <div
+                  onClick={() =>
+                    setInspectingBank({
+                      playerName: 'Your',
+                      totalAmount: myBankTotal,
+                      cards: myPlayer.bank || [],
+                      isSelf: true,
+                    })
+                  }
+                  role="button"
+                  tabIndex={0}
+                  className="h-28 bg-[#0b2318] hover:bg-[#0e2c1e] border border-dashed border-[#1f4d36] hover:border-amber-400/50 rounded-2xl p-2 flex items-center gap-2 overflow-x-auto shadow-inner cursor-pointer transition-colors group"
+                  title="Click to view and scroll all cards in your bank"
+                >
                   {myPlayer.bank.length === 0 ? (
-                    <div className="text-xs text-slate-500 italic mx-auto">empty</div>
+                    <div className="text-xs text-slate-500 italic mx-auto">Bank empty — click to inspect</div>
                   ) : (
                     myPlayer.bank.map((card) => (
                       <div
                         key={card.id}
-                        className="flex-shrink-0 scale-90 -mr-14 hover:mr-0 transition-all hover:scale-100 z-10 hover:z-30"
+                        className="flex-shrink-0 scale-90 -mr-14 hover:mr-0 transition-all hover:scale-100 z-10 hover:z-30 pointer-events-none"
                       >
                         <CardView card={card} size="sm" />
                       </div>
@@ -724,7 +790,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                 </div>
               </div>
 
-              {/* Property Sets on Table (Point 4: Shack rent & Point 5/9: Wildcard Flip buttons) */}
+              {/* Property Sets on Table (Points 3, 6, 7: Handsome card tiles + Inspect Modal) */}
               <div>
                 <div className="text-[10px] uppercase font-bold text-slate-400 tracking-wider mb-1">
                   YOUR SETS • {myCompleteSetsCount} COMPLETE
@@ -735,7 +801,7 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                     no sets played yet
                   </div>
                 ) : (
-                  <div className="flex flex-wrap gap-2 max-h-36 overflow-y-auto p-1">
+                  <div className="flex flex-wrap gap-2.5 max-h-40 overflow-y-auto p-1">
                     {myPlayer.properties.map((set, idx) => {
                       const meta = PROPERTY_CONFIG[set.color];
                       const count = set.cards.length;
@@ -749,67 +815,71 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                       return (
                         <div
                           key={idx}
-                          className="bg-[#0b2318] border border-slate-700/80 rounded-xl p-2 min-w-[130px] shadow flex flex-col justify-between"
+                          onClick={() =>
+                            setInspectingPropertySet({
+                              ownerName: 'Your',
+                              set,
+                              isOwner: true,
+                            })
+                          }
+                          role="button"
+                          tabIndex={0}
+                          className="bg-[#0b2318] hover:bg-[#0f2c1f] border border-slate-700/80 hover:border-amber-400/60 rounded-2xl p-2.5 min-w-[135px] max-w-[170px] shadow-lg flex flex-col justify-between cursor-pointer transition-all hover:scale-105 active:scale-95 group select-none"
+                          title="Click to view cards, flip wildcards, or move shacks"
                         >
                           <div>
-                            {/* Color Bar */}
+                            {/* Color Banner */}
                             <div
-                              className="text-[10px] font-heading font-bold px-1.5 py-0.5 rounded text-center mb-1 flex items-center justify-between"
+                              className="text-[11px] font-heading font-black px-2 py-1 rounded-xl text-center mb-1.5 flex items-center justify-between shadow-sm"
                               style={{
                                 backgroundColor: meta?.hexColor,
                                 color: meta?.textColor,
                               }}
                             >
                               <span className="truncate">{meta?.name}</span>
-                              <span>
+                              <span className="font-mono bg-black/20 px-1 rounded text-[10px]">
                                 {set.cards.length}/{meta?.setSize}
                               </span>
                             </div>
 
-                            {/* Point 4: Exact Rent Calculation Formula Display */}
-                            <div className="text-[9px] text-emerald-300 font-mono font-bold bg-black/50 px-1 py-0.5 rounded mb-1 text-center border border-emerald-500/20">
-                              Rent: ${baseRent}M {set.shack ? '+ $3M (Shack)' : ''} = ${totalRent}M
+                            {/* Rent Badge */}
+                            <div className="text-[9px] text-emerald-300 font-mono font-bold bg-black/50 px-1.5 py-0.5 rounded-lg mb-1.5 text-center border border-emerald-500/20">
+                              Rent: ${totalRent}M
                             </div>
 
                             {/* Shack and Building Badges */}
-                            <div className="flex flex-wrap gap-1 mb-1.5">
+                            <div className="flex flex-wrap gap-1 mb-1.5 justify-center">
                               {set.shack && (
-                                <span className="text-[8px] font-bold bg-amber-500/25 text-amber-300 border border-amber-400/50 px-1 py-0.2 rounded shadow-sm">
+                                <span className="text-[8px] font-bold bg-amber-500/25 text-amber-300 border border-amber-400/50 px-1.5 py-0.2 rounded-md shadow-sm">
                                   🛖 Shack (+ $3M)
                                 </span>
                               )}
                               {set.house && (
-                                <span className="text-[8px] font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-400/50 px-1 py-0.2 rounded shadow-sm">
+                                <span className="text-[8px] font-bold bg-emerald-500/25 text-emerald-300 border border-emerald-400/50 px-1.5 py-0.2 rounded-md shadow-sm">
                                   🏠 House (+ $3M)
                                 </span>
                               )}
                               {set.hotel && (
-                                <span className="text-[8px] font-bold bg-rose-500/25 text-rose-300 border border-rose-400/50 px-1 py-0.2 rounded shadow-sm">
+                                <span className="text-[8px] font-bold bg-rose-500/25 text-rose-300 border border-rose-400/50 px-1.5 py-0.2 rounded-md shadow-sm">
                                   🏨 Hotel (+ $4M)
                                 </span>
                               )}
                             </div>
 
-                            {/* Cards in this set */}
+                            {/* Cards preview in this set */}
                             <div className="space-y-1">
                               {set.cards.map((c) => {
                                 const isWild = c.type === CardType.PROPERTY_WILDCARD;
                                 return (
                                   <div
                                     key={c.id}
-                                    className="text-[9px] text-slate-200 bg-black/40 px-1.5 py-1 rounded flex items-center justify-between gap-1"
+                                    className="text-[9px] text-slate-200 bg-black/40 px-2 py-0.5 rounded-md flex items-center justify-between gap-1 border border-white/5"
                                   >
                                     <span className="truncate">{c.name}</span>
-                                    {/* Point 5 & 9: Flip Wildcard Button (Costs 1 Play) */}
-                                    {isWild && isMyTurn && (
-                                      <button
-                                        type="button"
-                                        onClick={() => handleFlipWildcardInSet(c, set.color)}
-                                        className="px-1.5 py-0.5 bg-amber-500/30 hover:bg-amber-400 hover:text-slate-950 text-amber-200 border border-amber-400/60 rounded text-[8px] font-bold tracking-tight active:scale-95 transition-all shadow"
-                                        title="Flip wildcard (Costs 1 Play)"
-                                      >
-                                        🔄 Flip (1 Play)
-                                      </button>
+                                    {isWild && (
+                                      <span className="text-[8px] text-amber-300 font-bold" title="Wildcard (Flippable)">
+                                        🔄
+                                      </span>
                                     )}
                                   </div>
                                 );
@@ -817,11 +887,21 @@ export const GameBoard: React.FC<GameBoardProps> = ({
                             </div>
                           </div>
 
-                          {set.isComplete && (
-                            <div className="mt-1.5 text-[8px] text-emerald-300 font-heading font-black bg-emerald-950/80 border border-emerald-500/40 py-0.5 rounded text-center uppercase tracking-wider">
-                              ✓ COMPLETE
-                            </div>
-                          )}
+                          {/* Bottom Status / Inspect Action */}
+                          <div className="mt-2 pt-1 border-t border-slate-800 flex items-center justify-between text-[8px]">
+                            {set.isComplete ? (
+                              <span className="text-emerald-400 font-black tracking-wider uppercase">
+                                ✓ Complete
+                              </span>
+                            ) : (
+                              <span className="text-slate-400 font-mono">
+                                {meta ? meta.setSize - set.cards.length : 1} needed
+                              </span>
+                            )}
+                            <span className="text-amber-300 font-bold group-hover:underline">
+                              👁️ Manage
+                            </span>
+                          </div>
                         </div>
                       );
                     })}
@@ -865,6 +945,36 @@ export const GameBoard: React.FC<GameBoardProps> = ({
           opponents={opponents}
           onConfirm={handleConfirmTargeting}
           onCancel={() => setTargetingCard(null)}
+        />
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 5B. BANK INSPECTOR MODAL (Point 4: Persistent Vault View)           */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {inspectingBank && (
+        <BankInspectorModal
+          playerName={inspectingBank.playerName}
+          totalAmount={inspectingBank.totalAmount}
+          cards={inspectingBank.cards}
+          isSelf={inspectingBank.isSelf}
+          onClose={() => setInspectingBank(null)}
+        />
+      )}
+
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {/* 5C. PROPERTY SET INSPECTOR MODAL (Points 3, 6, 7: Visual Inspector) */}
+      {/* ─────────────────────────────────────────────────────────────────── */}
+      {inspectingPropertySet && (
+        <PropertySetInspectorModal
+          ownerName={inspectingPropertySet.ownerName}
+          set={inspectingPropertySet.set}
+          isOwner={inspectingPropertySet.isOwner}
+          isMyTurn={isMyTurn}
+          playsRemaining={gameState.maxPlaysPerTurn - gameState.playsUsedThisTurn}
+          allPlayerSets={myPlayer.properties}
+          onFlipWildcard={handleFlipWildcardDirect}
+          onMoveShack={handleMoveShack}
+          onClose={() => setInspectingPropertySet(null)}
         />
       )}
 

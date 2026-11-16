@@ -36,6 +36,7 @@ import {
   EVENT_RESPOND_JUST_SAY_NO,
   EVENT_SUBMIT_PAYMENT,
   EVENT_SUBMIT_REPOSSESS,
+  EVENT_MOVE_SHACK,
   PropertyColor,
 } from '../../shared/types';
 import { GameEngine } from './gameEngine';
@@ -687,6 +688,10 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
 
     const room = rooms.get(roomCode);
     if (!room || room.hostId !== playerId) return;
+    if (room.gameState) {
+      // Game already initialized, prevent duplicate starts
+      return;
+    }
 
     if (room.players.length < room.minPlayers) {
       socket.emit(EVENT_ERROR, {
@@ -772,6 +777,26 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     const result = GameEngine.flipWildcard(room, playerId, data.cardId, data.toColor);
     if (!result.success) {
       socket.emit(EVENT_ERROR, { message: result.error || 'Cannot flip wildcard' });
+      return;
+    }
+
+    broadcastGameState(io, room);
+  });
+
+  // -------------------------------------------------------------------------
+  // 8A-2. MOVE SHACK BETWEEN PROPERTY SETS (Costs 1 Play - Point 7)
+  // -------------------------------------------------------------------------
+  socket.on(EVENT_MOVE_SHACK, (data: { fromColor: PropertyColor; toColor: PropertyColor }) => {
+    const roomCode = socketToRoomCode.get(socket.id);
+    const playerId = socketToPlayerId.get(socket.id);
+    if (!roomCode || !playerId) return;
+
+    const room = rooms.get(roomCode);
+    if (!room || !room.gameState || room.gameState.activePlayerId !== playerId) return;
+
+    const result = GameEngine.moveShack(room, playerId, data.fromColor, data.toColor);
+    if (!result.success) {
+      socket.emit(EVENT_ERROR, { message: result.error || 'Cannot move shack' });
       return;
     }
 

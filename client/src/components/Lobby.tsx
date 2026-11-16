@@ -28,6 +28,7 @@ export const Lobby: React.FC<LobbyProps> = ({
 }) => {
   const { socket } = useSocket();
   const [copiedLink, setCopiedLink] = useState(false);
+  const [isStarting, setIsStarting] = useState(false);
 
   const isHost = currentPlayer.isHost;
   const playerCount = room.players.length;
@@ -36,7 +37,7 @@ export const Lobby: React.FC<LobbyProps> = ({
   // Non-host human players must be ready
   const nonHostHumans = room.players.filter((p) => !p.isHost && !p.isBot);
   const allNonHostsReady = nonHostHumans.every((p) => p.isReady);
-  const canStart = isHost && canStartCount && allNonHostsReady;
+  const canStart = isHost && canStartCount && allNonHostsReady && !isStarting;
 
   const handleCopyInviteLink = () => {
     const inviteUrl = `${window.location.origin}/?room=${room.code}`;
@@ -65,7 +66,8 @@ export const Lobby: React.FC<LobbyProps> = ({
   };
 
   const handleStartGame = () => {
-    if (!canStart) return;
+    if (!canStart || isStarting) return;
+    setIsStarting(true);
     socket?.emit(EVENT_START_GAME);
   };
 

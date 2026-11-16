@@ -241,28 +241,30 @@ export const CardView: React.FC<CardViewProps> = ({
       )}
 
       {/* ───────────────────────────────────────────────────────────────── */}
-      {/* 6. PLAY / BANK CONTROLS ON HOVER                                  */}
+      {/* 6. PLAY / BANK CONTROLS (Point 1: Big, well-spaced buttons)        */}
       {/* ───────────────────────────────────────────────────────────────── */}
       {isPlayable && (
-        <div className="absolute inset-x-0 bottom-0 p-1.5 bg-slate-950/90 flex flex-col gap-1 z-30 rounded-b-xl opacity-0 hover:opacity-100 transition-opacity">
+        <div className="absolute inset-x-0 bottom-0 p-2 bg-slate-950/95 flex flex-col gap-2 z-30 rounded-b-2xl border-t border-amber-500/40 shadow-2xl opacity-0 group-hover:opacity-100 hover:opacity-100 transition-opacity">
           <button
+            type="button"
             onClick={(e) => {
               e.stopPropagation();
               onPlay?.(card);
             }}
-            className="w-full py-1 rounded bg-amber-400 hover:bg-amber-300 text-slate-950 font-heading font-bold text-[10px] uppercase tracking-wider shadow"
+            className="w-full py-2.5 px-2 rounded-xl bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-heading font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-transform"
           >
-            {isMoney ? 'Deposit' : isProperty ? 'Lay Down' : 'Play Card'}
+            {isMoney ? '💰 Deposit' : isProperty ? '🏡 Lay Down' : '⚡ Play Card'}
           </button>
           {isAction && onBank && (
             <button
+              type="button"
               onClick={(e) => {
                 e.stopPropagation();
                 onBank(card);
               }}
-              className="w-full py-0.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-heading font-bold text-[9px] uppercase tracking-wider shadow"
+              className="w-full py-2 px-2 rounded-xl bg-gradient-to-r from-emerald-600 to-emerald-700 hover:from-emerald-500 hover:to-emerald-600 text-white font-heading font-black text-xs uppercase tracking-wider shadow-lg active:scale-95 transition-transform border border-emerald-400/30"
             >
-              Bank (${card.cashValue}M)
+              🏦 Bank (${card.cashValue}M)
             </button>
           )}
         </div>
