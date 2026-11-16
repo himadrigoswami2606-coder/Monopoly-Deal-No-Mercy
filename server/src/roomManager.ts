@@ -707,8 +707,6 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
     const gameState = GameEngine.initializeGame(room);
     room.gameState = gameState;
 
-    GameEngine.startTurnDraw(room, gameState.activePlayerId);
-
     room.players.forEach((p) => {
       if (!p.isBot) {
         io.to(p.socketId).emit(EVENT_GAME_STARTED, {
