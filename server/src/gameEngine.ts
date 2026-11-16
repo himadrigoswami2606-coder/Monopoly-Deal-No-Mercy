@@ -429,11 +429,14 @@ export class GameEngine {
     if (options?.asBank || card.type === CardType.MONEY) {
       player.hand.splice(cardIndex, 1);
       player.bank.push(card);
+      const isMoney = card.type === CardType.MONEY;
       GameEngine.addLog(
         room,
         playerId,
         'BANK_CARD',
-        `${player.displayName} deposited ${card.name} into their Bank ($${card.cashValue}M cash).`
+        isMoney
+          ? `${player.displayName} kept $${card.cashValue}M in their Bank (${card.name}).`
+          : `${player.displayName} kept ${card.name} in their Bank as $${card.cashValue}M cash.`
       );
       room.gameState.playsUsedThisTurn++;
       GameEngine.checkAndBroadcastWin(room, player);
@@ -457,7 +460,7 @@ export class GameEngine {
         room,
         playerId,
         'PLAY_PROPERTY',
-        `${player.displayName} played ${card.name} into their ${PROPERTY_CONFIG[color].name} set.`
+        `${player.displayName} put property ${card.name} ($${card.cashValue}M) into their ${PROPERTY_CONFIG[color].name} set.`
       );
     }
     // ── 2. PROPERTY WILDCARD ─────────────────────────────────────────────
@@ -477,7 +480,7 @@ export class GameEngine {
         room,
         playerId,
         'PLAY_WILDCARD',
-        `${player.displayName} placed wildcard ${card.name} in their ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor} set.`
+        `${player.displayName} put wildcard ${card.name} into their ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor} property set.`
       );
     }
     // ── 3. ACTION CARDS ───────────────────────────────────────────────────
@@ -572,14 +575,14 @@ export class GameEngine {
           } else {
             // Bank as cash if no eligible property
             player.bank.push(card);
-            GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
+            GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} kept ${card.name} in their Bank as $${card.cashValue}M cash.`);
           }
           break;
         }
 
         default: {
           player.bank.push(card);
-          GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
+          GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} kept ${card.name} in their Bank as $${card.cashValue}M cash.`);
           break;
         }
       }

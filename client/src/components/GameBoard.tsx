@@ -1131,15 +1131,6 @@ export const GameBoard: React.FC<GameBoardProps> = ({
         </>
       )}
 
-      {/* Floating Status Notification when another player is reacting */}
-      {gameState.pendingAction && gameState.pendingAction.currentAwaitingPlayerId !== myPlayer.id && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-40 bg-[#0a1f15]/95 border-2 border-amber-500/80 px-6 py-2.5 rounded-2xl shadow-2xl flex items-center gap-3 backdrop-blur-md animate-pulse">
-          <span className="w-2.5 h-2.5 rounded-full bg-amber-400" />
-          <span className="font-heading text-xs font-bold uppercase tracking-wider text-amber-300">
-            Waiting for {players.find((p) => p.id === gameState.pendingAction!.currentAwaitingPlayerId)?.displayName || 'Opponent'} to respond to {gameState.pendingAction.card.name}...
-          </span>
-        </div>
-      )}
 
       {/* ─────────────────────────────────────────────────────────────────── */}
       {/* 6B. HAND LIMIT DISCARD MODAL (Point 2)                             */}
