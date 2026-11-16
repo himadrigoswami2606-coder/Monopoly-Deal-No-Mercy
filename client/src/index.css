@@ -4,42 +4,59 @@
 
 @layer base {
   body {
-    background-color: #121622;
+    background-color: #0b2318;
     color: #f1f5f9;
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
     overflow-x: hidden;
   }
 }
 
-/* Custom tabletop felt / textured effect */
-.tabletop-bg {
-  background-color: #121622;
+/* Authentic casino tabletop green felt */
+.felt-tabletop {
+  background-color: #0b2318;
   background-image: 
-    radial-gradient(circle at 50% 20%, rgba(30, 41, 59, 0.7) 0%, rgba(15, 23, 42, 0.95) 70%),
-    radial-gradient(rgba(245, 166, 35, 0.03) 1px, transparent 0);
-  background-size: 100% 100%, 24px 24px;
+    radial-gradient(ellipse at 50% 40%, rgba(19, 56, 38, 0.9) 0%, rgba(8, 25, 17, 0.98) 75%),
+    radial-gradient(rgba(234, 179, 8, 0.03) 1px, transparent 0);
+  background-size: 100% 100%, 20px 20px;
 }
 
-/* Card hover glow */
-.card-glow:hover {
-  box-shadow: 0 10px 25px -5px rgba(245, 166, 35, 0.25), 0 8px 10px -6px rgba(245, 166, 35, 0.2);
+/* Card Fanning & Peek Animation */
+.card-fan-item {
+  transition: transform 0.22s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.2s ease;
+  margin-left: -2.5rem;
 }
 
-/* Custom scrollbar */
+@media (min-width: 640px) {
+  .card-fan-item {
+    margin-left: -3.2rem;
+  }
+}
+
+.card-fan-item:first-child {
+  margin-left: 0;
+}
+
+.card-fan-item:hover {
+  transform: translateY(-28px) scale(1.08) !important;
+  z-index: 50 !important;
+  box-shadow: 0 20px 30px -10px rgba(0, 0, 0, 0.7), 0 0 15px rgba(250, 204, 21, 0.35);
+}
+
+/* Custom scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 
 ::-webkit-scrollbar-track {
-  background: rgba(15, 23, 42, 0.5);
+  background: rgba(11, 35, 24, 0.6);
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 3px;
+  background: #1f4d36;
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+  background: #2d6a4f;
 }
