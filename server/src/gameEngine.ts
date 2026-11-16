@@ -24,12 +24,11 @@ export class GameEngine {
    * 2. Issues 3 unique Debt Chips per player (ownerId === currentHolderId === player.id)
    * 3. Deals 5 private cards to each player
    * 4. Initializes property sets and banks for all players
-   * 5. Sets turn to first player and draws 2 initial cards (or deals 5 directly)
+   * 5. Sets turn to first player and draws 2 initial cards
    */
   static initializeGame(room: Room): GameState {
     const freshDeck = shuffleDeck(createDeck());
 
-    // 1. Give each player 3 Debt Chips and empty board state
     room.players.forEach((player) => {
       player.bank = [];
       player.properties = [];
@@ -44,8 +43,7 @@ export class GameEngine {
       player.debtChips = chips;
 
       // Deal 5 cards from deck to player hand
-      const initialHand = freshDeck.splice(0, 5);
-      player.hand = initialHand;
+      player.hand = freshDeck.splice(0, 5);
     });
 
     const firstPlayer = room.players[0];
@@ -57,8 +55,10 @@ export class GameEngine {
       playerName: firstPlayer.displayName,
       action: 'GAME_STARTED',
       details: `Game started with ${room.players.length} players! Mode: ${
-        room.winMode === 'EXTENDED_NO_MERCY' ? 'Extended (4 Sets + $20M + 3 Chips)' : 'Standard (3 Sets + $10M + 3 Chips)'
-      }. ${firstPlayer.displayName} plays first.`,
+        room.winMode === 'EXTENDED_NO_MERCY'
+          ? 'Extended (4 Sets + $20M + 3 Chips)'
+          : 'Standard (3 Sets + $10M + 3 Chips)'
+      }. ${firstPlayer.displayName} goes first.`,
     };
 
     const gameState: GameState = {
@@ -74,7 +74,6 @@ export class GameEngine {
       winBreakdown: null,
     };
 
-    // Store the remaining draw pile in the room state for the engine
     (room as any)._internalDrawPile = freshDeck;
 
     return gameState;
@@ -86,18 +85,15 @@ export class GameEngine {
   static drawCards(room: Room, playerId: string, count: number): Card[] {
     const drawPile: Card[] = (room as any)._internalDrawPile || [];
     const discardPile: Card[] = room.gameState?.discardPile || [];
-
     const drawn: Card[] = [];
 
     for (let i = 0; i < count; i++) {
       if (drawPile.length === 0) {
         if (discardPile.length > 0) {
-          // Recycle discard pile
           const recycled = shuffleDeck(discardPile.splice(0, discardPile.length));
           drawPile.push(...recycled);
           GameEngine.addLog(room, playerId, 'DRAW_PILE_RECYCLED', 'Discard pile reshuffled into draw pile.');
         } else {
-          // Out of cards
           break;
         }
       }
@@ -138,13 +134,20 @@ export class GameEngine {
   }
 
   /**
-   * Plays a card from the active player's hand.
+   * Plays a card from the active player's hand with full No Mercy action logic.
    */
   static playCard(
     room: Room,
     playerId: string,
     cardId: string,
-    options?: { targetColor?: PropertyColor; targetPlayerId?: string }
+    options?: {
+      targetPlayerId?: string;
+      targetColor?: PropertyColor;
+      targetCardId?: string;
+      myCardId?: string;
+      chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
+      asBank?: boolean;
+    }
   ): { success: boolean; error?: string } {
     if (!room.gameState || room.gameState.isGameOver) {
       return { success: false, error: 'Game is not active' };
@@ -170,30 +173,28 @@ export class GameEngine {
 
     const card = player.hand[cardIndex];
 
-    // Handle different card plays
-    if (card.type === CardType.MONEY) {
-      // Put directly into Bank
+    // Optional override: Bank any action card as cash
+    if (options?.asBank || card.type === CardType.MONEY) {
       player.hand.splice(cardIndex, 1);
       player.bank.push(card);
       GameEngine.addLog(
         room,
         playerId,
-        'BANK_MONEY',
-        `${player.displayName} banked $${card.cashValue}M cash.`
+        'BANK_CARD',
+        `${player.displayName} deposited ${card.name} into their Bank ($${card.cashValue}M cash).`
       );
-    } else if (card.type === CardType.PROPERTY) {
-      // Put into property set of this color
+      room.gameState.playsUsedThisTurn++;
+      GameEngine.checkAndBroadcastWin(room, player);
+      return { success: true };
+    }
+
+    // ── 1. PROPERTY CARD ──────────────────────────────────────────────────
+    if (card.type === CardType.PROPERTY) {
       player.hand.splice(cardIndex, 1);
       const color = card.color!;
       let set = player.properties.find((s) => s.color === color);
       if (!set) {
-        set = {
-          color,
-          cards: [],
-          house: false,
-          hotel: false,
-          isComplete: false,
-        };
+        set = { color, cards: [], house: false, hotel: false, isComplete: false };
         player.properties.push(set);
       }
       set.cards.push(card);
@@ -204,21 +205,16 @@ export class GameEngine {
         room,
         playerId,
         'PLAY_PROPERTY',
-        `${player.displayName} laid down ${card.name} (${PROPERTY_CONFIG[color].name}).`
+        `${player.displayName} played ${card.name} into their ${PROPERTY_CONFIG[color].name} set.`
       );
-    } else if (card.type === CardType.PROPERTY_WILDCARD) {
-      // Choose target color
+    }
+    // ── 2. PROPERTY WILDCARD ─────────────────────────────────────────────
+    else if (card.type === CardType.PROPERTY_WILDCARD) {
       const chosenColor = options?.targetColor || card.colors?.[0] || PropertyColor.DARK_BLUE;
       player.hand.splice(cardIndex, 1);
       let set = player.properties.find((s) => s.color === chosenColor);
       if (!set) {
-        set = {
-          color: chosenColor,
-          cards: [],
-          house: false,
-          hotel: false,
-          isComplete: false,
-        };
+        set = { color: chosenColor, cards: [], house: false, hotel: false, isComplete: false };
         player.properties.push(set);
       }
       set.cards.push(card);
@@ -231,69 +227,337 @@ export class GameEngine {
         'PLAY_WILDCARD',
         `${player.displayName} placed wildcard ${card.name} in their ${PROPERTY_CONFIG[chosenColor]?.name || chosenColor} set.`
       );
-    } else if (card.type === CardType.ACTION) {
-      // Actions: Pass Go, Bank as cash, House/Hotel, etc.
-      if (card.actionType === ActionType.PASS_GO) {
-        player.hand.splice(cardIndex, 1);
-        room.gameState.discardPile.unshift(card);
-        GameEngine.drawCards(room, playerId, 2);
-        GameEngine.addLog(
-          room,
-          playerId,
-          'PLAY_PASS_GO',
-          `${player.displayName} played Pass Go and drew 2 extra cards!`
-        );
-      } else if (card.actionType === ActionType.HOUSE || card.actionType === ActionType.HOTEL) {
-        // Can attach to complete set or bank as cash
-        const targetColor = options?.targetColor;
-        const set = player.properties.find((s) => s.color === targetColor);
-        if (targetColor && set && set.isComplete) {
-          player.hand.splice(cardIndex, 1);
-          if (card.actionType === ActionType.HOUSE) {
-            set.house = true;
+    }
+    // ── 3. ACTION CARDS ───────────────────────────────────────────────────
+    else if (card.type === CardType.ACTION) {
+      player.hand.splice(cardIndex, 1);
+      room.gameState.discardPile.unshift(card);
+
+      const targetOpponent = room.players.find((p) => p.id === options?.targetPlayerId);
+
+      switch (card.actionType) {
+        case ActionType.PASS_GO: {
+          GameEngine.drawCards(room, playerId, 2);
+          GameEngine.addLog(room, playerId, 'PLAY_PASS_GO', `${player.displayName} played Pass Go and drew 2 cards!`);
+          break;
+        }
+
+        case ActionType.SLY_DEAL: {
+          // Steal 1 single property card from an incomplete set
+          if (!targetOpponent) {
+            GameEngine.addLog(room, playerId, 'SLY_DEAL_FAIL', `${player.displayName} played Sly Deal with no target.`);
+            break;
+          }
+          let stolenCard: Card | null = null;
+          for (const set of targetOpponent.properties) {
+            if (!set.isComplete) {
+              const cIdx = set.cards.findIndex((c) => c.id === options?.targetCardId);
+              if (cIdx !== -1) {
+                stolenCard = set.cards.splice(cIdx, 1)[0];
+                if (set.cards.length === 0) {
+                  targetOpponent.properties = targetOpponent.properties.filter((s) => s !== set);
+                }
+                break;
+              }
+            }
+          }
+          if (stolenCard) {
+            const color = stolenCard.color || stolenCard.colors?.[0] || PropertyColor.DARK_BLUE;
+            let mySet = player.properties.find((s) => s.color === color);
+            if (!mySet) {
+              mySet = { color, cards: [], house: false, hotel: false, isComplete: false };
+              player.properties.push(mySet);
+            }
+            mySet.cards.push(stolenCard);
+            mySet.isComplete = mySet.cards.length >= PROPERTY_CONFIG[color].setSize;
             GameEngine.addLog(
               room,
               playerId,
-              'ADD_HOUSE',
-              `${player.displayName} added a House to their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $3M rent)!`
+              'SLY_DEAL_SUCCESS',
+              `🧤 ${player.displayName} used Sly Deal to steal ${stolenCard.name} from ${targetOpponent.displayName}!`
             );
           } else {
-            set.hotel = true;
+            GameEngine.addLog(room, playerId, 'SLY_DEAL', `${player.displayName} played Sly Deal against ${targetOpponent.displayName}.`);
+          }
+          break;
+        }
+
+        case ActionType.SUPER_SLY_DEAL: {
+          // Steal an entire complete set (including house/hotel)
+          if (!targetOpponent || !options?.targetColor) {
+            GameEngine.addLog(room, playerId, 'SUPER_SLY_DEAL_FAIL', `${player.displayName} played Super Sly Deal without a target set.`);
+            break;
+          }
+          const setIndex = targetOpponent.properties.findIndex(
+            (s) => s.color === options.targetColor && s.isComplete
+          );
+          if (setIndex !== -1) {
+            const stolenSet = targetOpponent.properties.splice(setIndex, 1)[0];
+            player.properties.push(stolenSet);
             GameEngine.addLog(
               room,
               playerId,
-              'ADD_HOTEL',
-              `${player.displayName} added a Hotel to their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $4M rent)!`
+              'SUPER_SLY_DEAL_SUCCESS',
+              `👑 ${player.displayName} used SUPER SLY DEAL to steal the entire complete ${PROPERTY_CONFIG[options.targetColor].name} set from ${targetOpponent.displayName}!`
             );
           }
-        } else {
-          // Default: bank it as cash
-          player.hand.splice(cardIndex, 1);
-          player.bank.push(card);
+          break;
+        }
+
+        case ActionType.FORCED_DEAL: {
+          // Swap 1 property card
+          if (!targetOpponent) break;
+          // Find stolen card from opponent incomplete set
+          let oppCard: Card | null = null;
+          for (const set of targetOpponent.properties) {
+            if (!set.isComplete) {
+              const cIdx = set.cards.findIndex((c) => c.id === options?.targetCardId);
+              if (cIdx !== -1) {
+                oppCard = set.cards.splice(cIdx, 1)[0];
+                if (set.cards.length === 0) {
+                  targetOpponent.properties = targetOpponent.properties.filter((s) => s !== set);
+                }
+                break;
+              }
+            }
+          }
+          // Find player's card to give
+          let myCard: Card | null = null;
+          for (const set of player.properties) {
+            if (!set.isComplete) {
+              const cIdx = set.cards.findIndex((c) => c.id === options?.myCardId);
+              if (cIdx !== -1) {
+                myCard = set.cards.splice(cIdx, 1)[0];
+                if (set.cards.length === 0) {
+                  player.properties = player.properties.filter((s) => s !== set);
+                }
+                break;
+              }
+            }
+          }
+          if (oppCard && myCard) {
+            // Put oppCard into player
+            const c1 = oppCard.color || oppCard.colors?.[0] || PropertyColor.DARK_BLUE;
+            let s1 = player.properties.find((s) => s.color === c1);
+            if (!s1) {
+              s1 = { color: c1, cards: [], house: false, hotel: false, isComplete: false };
+              player.properties.push(s1);
+            }
+            s1.cards.push(oppCard);
+
+            // Put myCard into target
+            const c2 = myCard.color || myCard.colors?.[0] || PropertyColor.DARK_BLUE;
+            let s2 = targetOpponent.properties.find((s) => s.color === c2);
+            if (!s2) {
+              s2 = { color: c2, cards: [], house: false, hotel: false, isComplete: false };
+              targetOpponent.properties.push(s2);
+            }
+            s2.cards.push(myCard);
+
+            GameEngine.addLog(
+              room,
+              playerId,
+              'FORCED_DEAL_SUCCESS',
+              `🔄 ${player.displayName} forced a swap: gave ${myCard.name} to ${targetOpponent.displayName} for ${oppCard.name}!`
+            );
+          }
+          break;
+        }
+
+        case ActionType.DEBT_COLLECTOR: {
+          // Force 1 player to pay $5M
+          if (targetOpponent) {
+            let collected = 0;
+            // Take cash from bank first
+            while (targetOpponent.bank.length > 0 && collected < 5) {
+              const c = targetOpponent.bank.pop()!;
+              collected += c.cashValue;
+              player.bank.push(c);
+            }
+            // If still owe, take debt chip!
+            if (collected < 5 && targetOpponent.debtChips.length > 0) {
+              const chip = targetOpponent.debtChips.pop()!;
+              chip.currentHolderId = player.id;
+              player.debtChips.push(chip);
+              GameEngine.addLog(
+                room,
+                playerId,
+                'DEBT_CHIP_TAKEN',
+                `🪙 ${targetOpponent.displayName} could not pay in full and surrendered a Debt Chip to ${player.displayName}!`
+              );
+            }
+            GameEngine.addLog(
+              room,
+              playerId,
+              'DEBT_COLLECTED',
+              `💰 ${player.displayName} collected $${collected}M from ${targetOpponent.displayName} using Debt Collector!`
+            );
+          }
+          break;
+        }
+
+        case ActionType.ITS_MY_BIRTHDAY: {
+          // Force all other players to pay $2M each
+          let totalCollected = 0;
+          room.players.forEach((other) => {
+            if (other.id !== playerId) {
+              if (other.bank.length > 0) {
+                const b = other.bank.pop()!;
+                totalCollected += b.cashValue;
+                player.bank.push(b);
+              }
+            }
+          });
           GameEngine.addLog(
             room,
             playerId,
-            'BANK_ACTION',
-            `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`
+            'BIRTHDAY_CELEBRATION',
+            `🎂 It's ${player.displayName}'s Birthday! Collected $${totalCollected}M from opponents!`
           );
+          break;
         }
-      } else {
-        // Other actions can be played or banked as cash
-        // If banking:
-        player.hand.splice(cardIndex, 1);
-        player.bank.push(card);
-        GameEngine.addLog(
-          room,
-          playerId,
-          'BANK_ACTION',
-          `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`
-        );
+
+        case ActionType.YOINK: {
+          // Steal up to $10M directly from 1 opponent's bank
+          if (targetOpponent) {
+            let stolenAmount = 0;
+            while (targetOpponent.bank.length > 0 && stolenAmount < 10) {
+              const b = targetOpponent.bank.pop()!;
+              stolenAmount += b.cashValue;
+              player.bank.push(b);
+            }
+            GameEngine.addLog(
+              room,
+              playerId,
+              'YOINK_SUCCESS',
+              `🧲 YOINK! ${player.displayName} snatched $${stolenAmount}M in cash directly from ${targetOpponent.displayName}'s Bank!`
+            );
+          }
+          break;
+        }
+
+        case ActionType.TOUGH_LUCK: {
+          // Opponent discards all cards of chosen category
+          if (targetOpponent && options?.chosenCategory) {
+            const cat = options.chosenCategory;
+            const discarded: Card[] = [];
+            targetOpponent.hand = targetOpponent.hand.filter((c) => {
+              const match =
+                (cat === 'MONEY' && c.type === CardType.MONEY) ||
+                (cat === 'PROPERTY' && (c.type === CardType.PROPERTY || c.type === CardType.PROPERTY_WILDCARD)) ||
+                (cat === 'ACTION' && c.type === CardType.ACTION);
+              if (match) discarded.push(c);
+              return !match;
+            });
+            room.gameState.discardPile.unshift(...discarded);
+            GameEngine.addLog(
+              room,
+              playerId,
+              'TOUGH_LUCK_HIT',
+              `☠️ Tough Luck! ${targetOpponent.displayName} was forced to discard ALL ${cat} cards (${discarded.length} cards) from their hand!`
+            );
+          }
+          break;
+        }
+
+        case ActionType.REPOSSESS: {
+          // Opponent gives all properties except 1
+          if (targetOpponent && targetOpponent.properties.length > 0) {
+            let surrenderedCount = 0;
+            // Leave first property, take all others
+            while (targetOpponent.properties.length > 1) {
+              const set = targetOpponent.properties.pop()!;
+              player.properties.push(set);
+              surrenderedCount += set.cards.length;
+            }
+            GameEngine.addLog(
+              room,
+              playerId,
+              'REPOSSESSION',
+              `🔨 Repossess! ${targetOpponent.displayName} was forced to surrender all property sets except 1 to ${player.displayName} (${surrenderedCount} cards)!`
+            );
+          }
+          break;
+        }
+
+        case ActionType.RENT: {
+          // Charge rent for chosen color
+          const targetColor = options?.targetColor;
+          if (targetColor) {
+            const set = player.properties.find((s) => s.color === targetColor);
+            const count = set ? set.cards.length : 0;
+            let rent = PROPERTY_CONFIG[targetColor]?.rentValues?.[Math.min(count - 1, (PROPERTY_CONFIG[targetColor]?.rentValues?.length || 1) - 1)] || 1;
+            if (set?.house) rent += 3;
+            if (set?.hotel) rent += 4;
+
+            // Charge target or all players
+            const targets = card.isWildRent && targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== playerId);
+            let totalPaid = 0;
+
+            targets.forEach((tgt) => {
+              if (tgt.bank.length > 0) {
+                const b = tgt.bank.pop()!;
+                totalPaid += b.cashValue;
+                player.bank.push(b);
+              } else if (tgt.debtChips.length > 0) {
+                // Surrender a Debt Chip if bank is empty
+                const chip = tgt.debtChips.pop()!;
+                chip.currentHolderId = player.id;
+                player.debtChips.push(chip);
+                GameEngine.addLog(room, tgt.id, 'DEBT_CHIP_SURRENDER', `🪙 ${tgt.displayName} had no cash to pay rent and surrendered a Debt Chip to ${player.displayName}!`);
+              }
+            });
+
+            GameEngine.addLog(
+              room,
+              playerId,
+              'RENT_CHARGED',
+              `📢 ${player.displayName} charged $${rent}M ${PROPERTY_CONFIG[targetColor].name} rent! Total collected: $${totalPaid}M.`
+            );
+          }
+          break;
+        }
+
+        case ActionType.HOUSE:
+        case ActionType.HOTEL: {
+          const targetColor = options?.targetColor;
+          const set = player.properties.find((s) => s.color === targetColor && s.isComplete);
+          if (targetColor && set) {
+            if (card.actionType === ActionType.HOUSE) {
+              set.house = true;
+              GameEngine.addLog(room, playerId, 'HOUSE_ADDED', `🏠 ${player.displayName} built a House on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $3M rent)!`);
+            } else {
+              set.hotel = true;
+              GameEngine.addLog(room, playerId, 'HOTEL_ADDED', `🏨 ${player.displayName} built a Hotel on their complete ${PROPERTY_CONFIG[targetColor].name} set (+ $4M rent)!`);
+            }
+          } else {
+            // Bank as cash if no complete set
+            player.bank.push(card);
+            GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
+          }
+          break;
+        }
+
+        default: {
+          // Bank any other action
+          player.bank.push(card);
+          GameEngine.addLog(room, playerId, 'BANK_CARD', `${player.displayName} banked ${card.name} as $${card.cashValue}M cash.`);
+          break;
+        }
       }
     }
 
     room.gameState.playsUsedThisTurn++;
+    GameEngine.checkAndBroadcastWin(room, player);
 
-    // Check win condition after play!
+    return { success: true };
+  }
+
+  /**
+   * Helper to check win condition and declare victory.
+   */
+  private static checkAndBroadcastWin(room: Room, player: Player): void {
+    if (!room.gameState) return;
     const winResult = checkWinCondition(player, room.winMode);
     if (winResult.isWinner) {
       room.gameState.isGameOver = true;
@@ -302,17 +566,15 @@ export class GameEngine {
 
       GameEngine.addLog(
         room,
-        playerId,
+        player.id,
         'GAME_WON',
         `🏆 ${player.displayName} HAS WON THE GAME! (${winResult.details.join(' | ')})`
       );
     }
-
-    return { success: true };
   }
 
   /**
-   * Ends the active player's turn and advances to the next player.
+   * Ends the active player's turn and advances to next player.
    */
   static endTurn(room: Room, playerId: string): { success: boolean; error?: string } {
     if (!room.gameState || room.gameState.isGameOver) {
@@ -339,7 +601,6 @@ export class GameEngine {
     room.gameState.turnNumber++;
     room.gameState.playsUsedThisTurn = 0;
 
-    // Next player automatically draws their turn cards
     GameEngine.startTurnDraw(room, nextPlayer.id);
 
     return { success: true };
@@ -365,7 +626,6 @@ export class GameEngine {
       details,
     };
     room.gameState.actionLog.unshift(logEntry);
-    // Keep last 50 entries
     if (room.gameState.actionLog.length > 50) {
       room.gameState.actionLog.pop();
     }

@@ -291,7 +291,15 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
   // -------------------------------------------------------------------------
   socket.on(
     EVENT_PLAY_CARD,
-    (data: { cardId: string; targetColor?: PropertyColor; targetPlayerId?: string }) => {
+    (data: {
+      cardId: string;
+      targetColor?: PropertyColor;
+      targetPlayerId?: string;
+      targetCardId?: string;
+      myCardId?: string;
+      chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
+      asBank?: boolean;
+    }) => {
       const roomCode = socketToRoomCode.get(socket.id);
       const playerId = socketToPlayerId.get(socket.id);
       if (!roomCode || !playerId) return;
@@ -302,6 +310,10 @@ export function registerRoomEvents(io: SocketIOServer, socket: Socket): void {
       const result = GameEngine.playCard(room, playerId, data.cardId, {
         targetColor: data.targetColor,
         targetPlayerId: data.targetPlayerId,
+        targetCardId: data.targetCardId,
+        myCardId: data.myCardId,
+        chosenCategory: data.chosenCategory,
+        asBank: data.asBank,
       });
 
       if (!result.success) {

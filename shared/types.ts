@@ -324,7 +324,15 @@ export interface ClientToServerEvents {
   [EVENT_TOGGLE_READY]: () => void;
   [EVENT_SET_WIN_MODE]: (data: { winMode: WinMode }) => void;
   [EVENT_START_GAME]: () => void;
-  [EVENT_PLAY_CARD]: (data: { cardId: string; targetColor?: PropertyColor; targetPlayerId?: string }) => void;
+  [EVENT_PLAY_CARD]: (data: {
+    cardId: string;
+    targetColor?: PropertyColor;
+    targetPlayerId?: string;
+    targetCardId?: string;
+    myCardId?: string;
+    chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
+    asBank?: boolean;
+  }) => void;
   [EVENT_END_TURN]: () => void;
   [EVENT_DRAW_CARDS]: () => void;
   [EVENT_LEAVE_ROOM]: () => void;
