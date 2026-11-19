@@ -198,7 +198,7 @@ export const PropertySetInspectorModal: React.FC<PropertySetInspectorModalProps>
 
               // Color choices for wildcard
               const availableColors: PropertyColor[] = c.isRainbow
-                ? allPlayerSets.map((s) => s.color).filter((col) => col !== set.color)
+                ? allPlayerSets.filter((s) => s.cards.length > 0 && s.color !== set.color).map((s) => s.color)
                 : (c.colors || []).filter((col) => col !== set.color);
 
               return (

@@ -399,6 +399,8 @@ export class GameEngine {
       myCardId?: string;
       chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
       asBank?: boolean;
+      marketCrashSelections?: Record<string, string>;
+      heistSelections?: Record<string, string>;
     }
   ): { success: boolean; error?: string } {
     if (!room.gameState || room.gameState.isGameOver) {
@@ -671,6 +673,10 @@ export class GameEngine {
     } else if (card.actionType === ActionType.ITS_MY_BIRTHDAY) {
       rentAmount = 2;
       targets = room.players.filter((p) => p.id !== player.id);
+    } else if (card.actionType === ActionType.YOINK) {
+      rentAmount = 10;
+      targets = targetOpponent ? [targetOpponent] : room.players.filter((p) => p.id !== player.id);
+      if (targets.length > 1) targets = [targets[0]];
     } else if (card.actionType === ActionType.SUPER_SLY_DEAL) {
       const chosenColor = options?.targetColor;
       targets = room.players.filter(
@@ -735,9 +741,11 @@ export class GameEngine {
         rentAmount,
         amountDue: rentAmount,
         isDoubleRent: card.actionType === ActionType.DOUBLE_THE_RENT,
-        demandDescription: card.actionType === ActionType.DOUBLE_THE_RENT
-          ? `DOUBLE RENT on ${PROPERTY_CONFIG[options?.targetColor as PropertyColor]?.name || 'Properties'}: $${rentAmount}M`
-          : undefined,
+        demandDescription: card.actionType === ActionType.YOINK
+          ? `YOINK! Demands $10M from your Bank/assets`
+          : (card.actionType === ActionType.DOUBLE_THE_RENT
+            ? `DOUBLE RENT on ${PROPERTY_CONFIG[options?.targetColor as PropertyColor]?.name || 'Properties'}: $${rentAmount}M`
+            : undefined),
         rentColor: options?.targetColor,
         justSayNoChain: [],
         status: 'AWAITING_JSN',
@@ -756,7 +764,8 @@ export class GameEngine {
     if (
       card.actionType === ActionType.RENT ||
       card.actionType === ActionType.DOUBLE_THE_RENT ||
-      card.actionType === ActionType.ITS_MY_BIRTHDAY
+      card.actionType === ActionType.ITS_MY_BIRTHDAY ||
+      card.actionType === ActionType.YOINK
     ) {
       room.gameState.pendingAction = {
         id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -771,9 +780,11 @@ export class GameEngine {
         rentAmount,
         amountDue: rentAmount,
         isDoubleRent: card.actionType === ActionType.DOUBLE_THE_RENT,
-        demandDescription: card.actionType === ActionType.DOUBLE_THE_RENT
-          ? `DOUBLE RENT on ${PROPERTY_CONFIG[options?.targetColor as PropertyColor]?.name || 'Properties'}: $${rentAmount}M`
-          : undefined,
+        demandDescription: card.actionType === ActionType.YOINK
+          ? `YOINK! Demands $10M from your Bank/assets`
+          : (card.actionType === ActionType.DOUBLE_THE_RENT
+            ? `DOUBLE RENT on ${PROPERTY_CONFIG[options?.targetColor as PropertyColor]?.name || 'Properties'}: $${rentAmount}M`
+            : undefined),
         rentColor: options?.targetColor,
         justSayNoChain: [],
         status: 'AWAITING_PAYMENT',
@@ -782,8 +793,10 @@ export class GameEngine {
       GameEngine.addLog(
         room,
         player.id,
-        'RENT_DEMANDED',
-        `📢 ${player.displayName} demanded $${rentAmount}M ${card.actionType === ActionType.DOUBLE_THE_RENT ? '(DOUBLED RENT) ' : ''}from ${firstTarget.displayName} with ${card.name}!`
+        card.actionType === ActionType.YOINK ? 'YOINK_DEMANDED' : 'RENT_DEMANDED',
+        card.actionType === ActionType.YOINK
+          ? `🧲 ${player.displayName} demanded $10M from ${firstTarget.displayName} with YOINK!!`
+          : `📢 ${player.displayName} demanded $${rentAmount}M ${card.actionType === ActionType.DOUBLE_THE_RENT ? '(DOUBLED RENT) ' : ''}from ${firstTarget.displayName} with ${card.name}!`
       );
       return { success: true };
     }
@@ -846,7 +859,7 @@ export class GameEngine {
     }
 
     if (card.actionType === ActionType.HEIST) {
-      GameEngine.executeHeistOnTarget(room, player, firstTarget);
+      GameEngine.executeHeistOnTarget(room, player, firstTarget, options?.heistSelections?.[firstTarget.id]);
       if (targets.length > 1) {
         room.gameState.pendingAction = {
           id: `pa-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
@@ -1055,24 +1068,6 @@ export class GameEngine {
         break;
       }
 
-      case ActionType.YOINK: {
-        if (targetOpponent) {
-          let stolen = 0;
-          while (targetOpponent.bank.length > 0 && stolen < 10) {
-            const b = targetOpponent.bank.pop()!;
-            stolen += b.cashValue;
-            player.bank.push(b);
-          }
-          GameEngine.addLog(
-            room,
-            player.id,
-            'YOINK_SUCCESS',
-            `🧲 YOINK! ${player.displayName} snatched $${stolen}M in cash directly from ${targetOpponent.displayName}'s Bank!`
-          );
-        }
-        break;
-      }
-
       case ActionType.TOUGH_LUCK: {
         if (targetOpponent && options?.chosenCategory) {
           const cat = options.chosenCategory;
@@ -1193,7 +1188,8 @@ export class GameEngine {
         if (
           pending.actionType === ActionType.RENT ||
           pending.actionType === ActionType.DOUBLE_THE_RENT ||
-          pending.actionType === ActionType.ITS_MY_BIRTHDAY
+          pending.actionType === ActionType.ITS_MY_BIRTHDAY ||
+          pending.actionType === ActionType.YOINK
         ) {
           pending.status = 'AWAITING_PAYMENT';
           return;
@@ -1202,7 +1198,7 @@ export class GameEngine {
         if (pending.actionType === ActionType.HEIST) {
           const attacker = room.players.find((p) => p.id === pending.attackerId);
           if (attacker) {
-            GameEngine.executeHeistOnTarget(room, attacker, nextPlayer);
+            GameEngine.executeHeistOnTarget(room, attacker, nextPlayer, pending.options?.heistSelections?.[nextPlayer.id]);
           }
           pending.targetPlayerIds.shift();
           continue;
@@ -1240,7 +1236,8 @@ export class GameEngine {
     if (
       pending.actionType === ActionType.RENT ||
       pending.actionType === ActionType.DOUBLE_THE_RENT ||
-      pending.actionType === ActionType.ITS_MY_BIRTHDAY
+      pending.actionType === ActionType.ITS_MY_BIRTHDAY ||
+      pending.actionType === ActionType.YOINK
     ) {
       pending.status = 'AWAITING_PAYMENT';
       return;
@@ -1271,7 +1268,7 @@ export class GameEngine {
 
     if (pending.actionType === ActionType.HEIST) {
       if (attacker && target) {
-        GameEngine.executeHeistOnTarget(room, attacker, target);
+        GameEngine.executeHeistOnTarget(room, attacker, target, pending.options?.heistSelections?.[target.id]);
       }
       GameEngine.advancePendingActionToNextTarget(room);
       return;
@@ -1608,19 +1605,31 @@ export class GameEngine {
    * Executes Heist on 1 target: steals 1 card from their Bank directly into attacker's Bank.
    * If target bank is empty, steals nothing and no debt chip is owed!
    */
-  static executeHeistOnTarget(room: Room, attacker: Player, target: Player): void {
+  static executeHeistOnTarget(room: Room, attacker: Player, target: Player, chosenCardId?: string): void {
     if (target.bank.length === 0) {
       GameEngine.addLog(
         room,
         attacker.id,
         'HEIST_EMPTY',
-        `${attacker.displayName} raided ${target.displayName}'s Bank, but it was empty! (No debt chip owed).`
+        `🏦 ${attacker.displayName} raided ${target.displayName}'s Bank, but it was empty! (No debt chip owed).`
       );
       return;
     }
-    // Sort to steal highest cash value card
-    target.bank.sort((a, b) => b.cashValue - a.cashValue);
-    const stolenCard = target.bank.shift()!;
+
+    let stolenCard: Card | null = null;
+    if (chosenCardId) {
+      const idx = target.bank.findIndex((c) => c.id === chosenCardId);
+      if (idx !== -1) {
+        stolenCard = target.bank.splice(idx, 1)[0];
+      }
+    }
+
+    if (!stolenCard) {
+      // Sort to steal highest cash value card as fallback
+      target.bank.sort((a, b) => b.cashValue - a.cashValue);
+      stolenCard = target.bank.shift()!;
+    }
+
     attacker.bank.push(stolenCard);
     GameEngine.addLog(
       room,
@@ -1733,31 +1742,38 @@ export class GameEngine {
     if (!player) return { success: false, error: 'Player not found' };
 
     let foundCard: Card | null = null;
+    let originSet: PropertySet | null = null;
+    let cardIdx = -1;
     for (const set of player.properties) {
       const idx = set.cards.findIndex((c) => c.id === cardId);
       if (idx !== -1) {
-        foundCard = set.cards.splice(idx, 1)[0];
-        set.isComplete = set.cards.length >= (PROPERTY_CONFIG[set.color]?.setSize || 3);
-        if (set.cards.length === 0) {
-          player.properties = player.properties.filter((s) => s !== set);
-        }
+        foundCard = set.cards[idx];
+        originSet = set;
+        cardIdx = idx;
         break;
       }
     }
 
-    if (!foundCard) {
+    if (!foundCard || !originSet || cardIdx === -1) {
       return { success: false, error: 'Wildcard not found in your properties' };
     }
 
-    // Point 9: Rainbow wildcard color restriction
+    // Point 9: Rainbow wildcard color restriction: can only be flipped to a property color you already own on the table
     if (foundCard.isRainbow) {
-      const playerHasColor = player.properties.some((s) => s.color === toColor);
+      const playerHasColor = player.properties.some((s) => s.color === toColor && s.cards.length > 0);
       if (!playerHasColor) {
         return {
           success: false,
           error: 'Rainbow Wildcard can only be placed on a color you already own in your properties!',
         };
       }
+    }
+
+    // Now safely splice the card out of its origin set
+    originSet.cards.splice(cardIdx, 1);
+    originSet.isComplete = originSet.cards.length >= (PROPERTY_CONFIG[originSet.color]?.setSize || 3);
+    if (originSet.cards.length === 0) {
+      player.properties = player.properties.filter((s) => s !== originSet);
     }
 
     let targetSet = player.properties.find((s) => s.color === toColor);

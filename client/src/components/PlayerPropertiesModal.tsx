@@ -217,30 +217,47 @@ export const PlayerPropertiesModal: React.FC<PlayerPropertiesModalProps> = ({
                             Flip to which color? (Costs 1 shot):
                           </div>
                           <div className="flex flex-wrap gap-1">
-                            {set.cards.find((c) => c.id === flippingCardId)?.colors?.map((col) => {
-                              if (col === set.color) return null;
-                              const colMeta = PROPERTY_CONFIG[col];
-                              return (
-                                <button
-                                  key={col}
-                                  type="button"
-                                  onClick={() => {
-                                    const card = set.cards.find((c) => c.id === flippingCardId);
-                                    if (card && onFlipWildcard) {
-                                      onFlipWildcard(card, col);
-                                      setFlippingCardId(null);
-                                    }
-                                  }}
-                                  className="px-2 py-1 rounded text-[10px] font-bold shadow text-slate-950 uppercase"
-                                  style={{
-                                    backgroundColor: colMeta?.hexColor,
-                                    color: colMeta?.textColor,
-                                  }}
-                                >
-                                  ➔ {colMeta?.name}
-                                </button>
-                              );
-                            })}
+                            {(() => {
+                              const flippingCard = set.cards.find((c) => c.id === flippingCardId);
+                              const availableColors: PropertyColor[] = flippingCard?.isRainbow
+                                ? properties
+                                    .filter((s: PropertySet) => s.color !== set.color && s.cards.length > 0)
+                                    .map((s: PropertySet) => s.color)
+                                : (flippingCard?.colors || []).filter((col) => col !== set.color);
+
+                              if (availableColors.length === 0) {
+                                return (
+                                  <div className="text-[10px] text-slate-400 italic">
+                                    {flippingCard?.isRainbow
+                                      ? 'No other owned property colors to flip to!'
+                                      : 'No other color options.'}
+                                  </div>
+                                );
+                              }
+
+                              return availableColors.map((col) => {
+                                const colMeta = PROPERTY_CONFIG[col];
+                                return (
+                                  <button
+                                    key={col}
+                                    type="button"
+                                    onClick={() => {
+                                      if (flippingCard && onFlipWildcard) {
+                                        onFlipWildcard(flippingCard, col);
+                                        setFlippingCardId(null);
+                                      }
+                                    }}
+                                    className="px-2 py-1 rounded text-[10px] font-bold shadow text-slate-950 uppercase"
+                                    style={{
+                                      backgroundColor: colMeta?.hexColor,
+                                      color: colMeta?.textColor,
+                                    }}
+                                  >
+                                    ➔ {colMeta?.name}
+                                  </button>
+                                );
+                              });
+                            })()}
                           </div>
                         </div>
                       )}

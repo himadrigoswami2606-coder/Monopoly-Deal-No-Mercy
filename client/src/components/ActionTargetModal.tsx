@@ -20,6 +20,7 @@ interface ActionTargetModalProps {
     myCardId?: string;
     chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
     marketCrashSelections?: Record<string, string>;
+    heistSelections?: Record<string, string>;
   }) => void;
   onCancel: () => void;
 }
@@ -43,6 +44,8 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
 
   // Market Crash selections: mapping of opponentId -> propertyCardId
   const [marketCrashSelections, setMarketCrashSelections] = useState<Record<string, string>>({});
+  // Heist selections: mapping of opponentId -> bankCardId
+  const [heistSelections, setHeistSelections] = useState<Record<string, string>>({});
 
   const selectedOpponent = opponents.find((p) => p.id === selectedOpponentId);
 
@@ -97,6 +100,21 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
     }
   }, [isMarketCrash]);
 
+  // Pre-initialize Heist selections with highest cash value card per opponent
+  useEffect(() => {
+    if (isHeist) {
+      const initial: Record<string, string> = {};
+      opponents.forEach((opp) => {
+        const bank = opp.bankCards || (opp as any).bank || [];
+        if (bank.length > 0) {
+          const sorted = [...bank].sort((a: Card, b: Card) => (b.cashValue || 0) - (a.cashValue || 0));
+          initial[opp.id] = sorted[0].id;
+        }
+      });
+      setHeistSelections(initial);
+    }
+  }, [isHeist, opponents]);
+
   // Actions that require choosing a SINGLE target opponent:
   // Note: Super Sly Deal, Market Crash, Heist, and Dual Rent target ALL opponents!
   const needsOpponentPicker =
@@ -147,6 +165,7 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
       myCardId: selectedMyCardId,
       chosenCategory: selectedCategory,
       marketCrashSelections: isMarketCrash ? marketCrashSelections : undefined,
+      heistSelections: isHeist ? heistSelections : undefined,
     });
   };
 
@@ -544,19 +563,99 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
           </div>
         )}
 
-        {/* 6. Heist Banner */}
+        {/* 6. Heist: Choose 1 Card to Steal from Each Opponent's Bank */}
         {isHeist && (
-          <div className="mb-4 bg-emerald-950/40 border border-emerald-500/30 rounded-2xl p-3 text-xs text-emerald-200">
-            <div className="font-bold text-emerald-300 text-sm mb-1 flex items-center gap-1.5">
-              <span>💰</span> Raids Every Opponent's Bank!
+          <div className="mb-4">
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider text-emerald-300">
+                💰 Choose 1 Card to Steal From Each Player's Bank:
+              </label>
             </div>
-            <p>
-              Heist will steal 1 card from <strong>every other player's Bank</strong> directly into your own Bank!
+            <p className="text-[11px] text-slate-300 mb-2.5 leading-relaxed bg-[#0c271a] p-2.5 rounded-xl border border-emerald-900/40">
+              Heist allows you to raid and steal <strong>1 card from every other player's Bank</strong> directly into your own Bank. Click a card under each opponent to choose what you want to steal.
+              <br />
+              <span className="text-slate-400 text-[10px]">
+                • If an opponent has an empty Bank, they give nothing and do not owe a debt chip.<br />
+                • Each opponent can play Just Say No to protect their bank.
+              </span>
             </p>
-            <p className="mt-1.5 text-slate-400 text-[11px] leading-relaxed">
-              • Empty banks give nothing (no debt chips are taken).<br />
-              • Each opponent can play Just Say No to protect their bank.
-            </p>
+
+            <div className="space-y-3 max-h-64 overflow-y-auto pr-1">
+              {opponents.map((opp) => {
+                const colorTheme = PLAYER_COLORS[opp.colorIndex % PLAYER_COLORS.length];
+                const bank = opp.bankCards || (opp as any).bank || [];
+                const currentSelectedCardId = heistSelections[opp.id];
+
+                return (
+                  <div
+                    key={opp.id}
+                    className="bg-slate-950/80 p-3 rounded-2xl border border-slate-800 space-y-2 shadow-sm"
+                  >
+                    <div className="flex items-center justify-between border-b border-slate-800/80 pb-1.5">
+                      <div className="flex items-center gap-2">
+                        <div
+                          className={`w-6 h-6 rounded-full flex items-center justify-center font-bold text-xs text-slate-950 ${colorTheme.bg}`}
+                        >
+                          {opp.displayName.charAt(0).toUpperCase()}
+                        </div>
+                        <span className="font-bold text-xs text-slate-200">{opp.displayName}</span>
+                      </div>
+                      <span className="text-[10px] text-emerald-400 font-mono font-bold">
+                        ${opp.bankTotal}M Bank ({bank.length} cards)
+                      </span>
+                    </div>
+
+                    {bank.length === 0 ? (
+                      <div className="text-[11px] text-slate-500 italic p-2 bg-slate-900/40 rounded-xl border border-slate-800 text-center">
+                        🏦 Empty Bank — Nothing to raid (no debt chip taken)
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5">
+                        {bank.map((c: Card) => {
+                          const isChosen = currentSelectedCardId === c.id;
+                          return (
+                            <button
+                              key={c.id}
+                              type="button"
+                              onClick={() =>
+                                setHeistSelections((prev) => ({
+                                  ...prev,
+                                  [opp.id]: c.id,
+                                }))
+                              }
+                              className={`p-2 rounded-xl border text-left flex flex-col justify-between transition-all ${
+                                isChosen
+                                  ? 'bg-emerald-500/25 border-emerald-400 ring-2 ring-emerald-400/50 shadow'
+                                  : 'bg-slate-900/80 border-slate-700/80 hover:border-slate-500'
+                              }`}
+                            >
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <span className="font-bold text-[11px] truncate text-slate-200">
+                                  {c.name}
+                                </span>
+                                <span className="text-emerald-400 font-mono font-bold text-[11px] flex-shrink-0">
+                                  ${c.cashValue}M
+                                </span>
+                              </div>
+                              <div className="flex items-center justify-between text-[9px] mt-0.5">
+                                <span className="text-slate-400 capitalize">{c.type.toLowerCase().replace('_', ' ')}</span>
+                                {isChosen ? (
+                                  <span className="text-emerald-300 font-bold bg-emerald-500/30 px-1 py-0.2 rounded text-[8px]">
+                                    ✓ Stealing
+                                  </span>
+                                ) : (
+                                  <span className="text-slate-500 hover:text-slate-400">Click to pick</span>
+                                )}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </div>
         )}
 
@@ -647,6 +746,8 @@ export const ActionTargetModal: React.FC<ActionTargetModalProps> = ({
               ? `Steal All ${PROPERTY_CONFIG[selectedColor || PropertyColor.DARK_BLUE]?.name || ''} Properties`
               : isMarketCrash
               ? `Steal ${Object.keys(marketCrashSelections).length} Selected Properties`
+              : isHeist
+              ? `Raid Banks (${Object.keys(heistSelections).length} Cards Selected)`
               : 'Confirm & Play'}
           </button>
         </div>

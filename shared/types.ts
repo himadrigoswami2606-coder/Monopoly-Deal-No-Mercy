@@ -407,6 +407,7 @@ export interface ClientToServerEvents {
     chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
     asBank?: boolean;
     marketCrashSelections?: Record<string, string>;
+    heistSelections?: Record<string, string>;
   }) => void;
   [EVENT_END_TURN]: (data?: { discardCardIds?: string[] }) => void;
   [EVENT_DRAW_CARDS]: () => void;

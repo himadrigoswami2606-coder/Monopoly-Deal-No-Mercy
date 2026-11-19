@@ -69,11 +69,21 @@ export const WildcardSelectModal: React.FC<WildcardSelectModalProps> = ({
 
         {/* Side-by-Side Color Tiles (Identical to Screenshot 1) */}
         {eligibleColors.length === 0 ? (
-          <div className="p-4 bg-black/40 rounded-2xl border border-amber-500/30 text-center my-4">
+          <div className="p-4 bg-black/40 rounded-2xl border border-amber-500/30 text-center my-4 space-y-3">
             <p className="text-amber-400 font-bold text-xs uppercase mb-1">No Eligible Property Sets</p>
             <p className="text-[11px] text-slate-300">
-              According to Monopoly Deal: No Mercy rules, a Rainbow Wildcard can only be placed on or flipped to a color you currently own in your properties!
+              According to Monopoly Deal: No Mercy rules, a Rainbow Wildcard cannot start a new color set — it can only be placed on or flipped to a property color you already own on the table!
             </p>
+            <p className="text-[10px] text-slate-400">
+              You can bank this card as $0M cash or hold it in your hand until you lay down a property.
+            </p>
+            <button
+              type="button"
+              onClick={onCancel}
+              className="py-2 px-5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold uppercase transition-colors border border-slate-600"
+            >
+              Understood
+            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-2">

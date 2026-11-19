@@ -153,7 +153,7 @@ function triggerBotReactionIfPending(io: SocketIOServer, room: Room): void {
       }
       broadcastGameState(io, room);
     } else if (pending.status === 'AWAITING_PAYMENT') {
-      const amountDue = pending.rentAmount || 1;
+      const amountDue = pending.amountDue || pending.rentAmount || 1;
       const selectedIds: string[] = [];
       let paid = 0;
 
@@ -221,6 +221,8 @@ function chooseBotCardPlay(room: Room, bot: Player): {
     myCardId?: string;
     chosenCategory?: 'MONEY' | 'PROPERTY' | 'ACTION';
     asBank?: boolean;
+    marketCrashSelections?: Record<string, string>;
+    heistSelections?: Record<string, string>;
   };
 } | null {
   const opponents = room.players.filter((p) => p.id !== bot.id);
@@ -365,7 +367,14 @@ function chooseBotCardPlay(room: Room, bot: Player): {
     (c) => c.type === CardType.ACTION && c.actionType === ActionType.HEIST
   );
   if (heistCard && opponents.some((o) => o.bank.length > 0)) {
-    return { cardId: heistCard.id };
+    const heistSelections: Record<string, string> = {};
+    opponents.forEach((opp) => {
+      if (opp.bank.length > 0) {
+        const sorted = [...opp.bank].sort((a, b) => b.cashValue - a.cashValue);
+        heistSelections[opp.id] = sorted[0].id;
+      }
+    });
+    return { cardId: heistCard.id, options: { heistSelections } };
   }
 
   // 5C. Unfair Trade: Swap entire bank if bot has bank cards and opponent is richer!
